@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "animaldesk"
+dynamic = ["version"]
+description = "AnimalDesk - il tuo animale, dalla foto vera, animato sul desktop"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = ["PySide6-Essentials>=6.6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+build = ["pyinstaller>=6.6"]
+foto = ["opencv-python-headless>=4.8", "numpy>=1.26", "pymatting>=1.1", "anthropic>=1.0"]
+
+[project.gui-scripts]
+animaldesk = "animaldesk.__main__:main"
+
+[tool.setuptools]
+packages = ["animaldesk", "animaldesk.tools"]
+
+[tool.setuptools.dynamic]
+version = { attr = "animaldesk.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
