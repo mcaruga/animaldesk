@@ -45,3 +45,8 @@ class Pose:
     prop: str = ""               # oggetto di scena ("keyboard")
     view: str = ""               # vista richiesta: "" = casa, busto, seduto, serio, dietro
     away: float = 0.0            # si allontana: 0 qui .. 1 sparito in lontananza
+    # zampe della figura intera (mesh): sollevamento 0..1 e oscillazione -1 (verso il petto) .. +1 (in fuori)
+    lift_l: float = 0.0
+    lift_r: float = 0.0
+    swing_l: float = 0.0
+    swing_r: float = 0.0

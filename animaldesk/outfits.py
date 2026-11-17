@@ -300,13 +300,13 @@ def draw_behind(painter: QPainter, outfit: str, skin, size: float) -> None:
     painter.restore()
 
 
-def draw_front(painter: QPainter, prop: str, outfit: str, skin, size: float) -> None:
+def draw_front(painter: QPainter, prop: str, outfit: str, skin, size: float, prop_scale: float = 1.0) -> None:
     painter.save()
     painter.setRenderHint(QPainter.Antialiasing, True)
     if outfit == "summer":
         _ring_arc(painter, size, skin.sw, front=True)
     if prop == "keyboard":
-        _keyboard(painter, skin.sw, size)
+        _keyboard(painter, skin.sw, size * prop_scale)
     painter.restore()
 
 

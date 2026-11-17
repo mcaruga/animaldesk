@@ -389,7 +389,45 @@ def _center_on(sprite, marks: dict, key: str = "neck"):
     return sprite, out
 
 
-def make_view(sprite, marks: dict, kind: str, open_mouth: bool = False) -> dict:
+def find_legs(sprite, center: float = 0.5) -> list[list[float]]:
+    """Zampe animabili di una figura intera: i due piedi piu' esterni alla base della sagoma.
+
+    Guarda una fascia vicino ai piedi, raggruppa le colonne occupate e prende il gruppo piu' a
+    sinistra e quello piu' a destra; l'attacco sta circa un quarto d'altezza piu' in alto, un
+    poco verso il centro. Se non trova almeno due piedi distinti restituisce [] (niente zampe:
+    le azioni useranno il primo piano). Forma: [u_attacco, v_attacco, u_piede, v_piede, larghezza]."""
+    import numpy as np
+
+    alpha = sprite[:, :, 3] > 128 if sprite.shape[2] == 4 else np.ones(sprite.shape[:2], bool)
+    h, w = alpha.shape
+    band = alpha[int(h * 0.88):int(h * 0.965)]
+    cols = band.mean(axis=0) > 0.25
+    runs, start = [], None
+    for x in range(w + 1):
+        on = x < w and bool(cols[x])
+        if on and start is None:
+            start = x
+        elif not on and start is not None:
+            runs.append([start, x - 1])
+            start = None
+    merged: list[list[int]] = []
+    for a, b in runs:                                  # buchi piccoli (pelo) non separano due piedi
+        if merged and a - merged[-1][1] < w * 0.03:
+            merged[-1][1] = b
+        else:
+            merged.append([a, b])
+    merged = [r for r in merged if r[1] - r[0] >= w * 0.04]
+    if len(merged) < 2:
+        return []
+    legs = []
+    for a, b in (merged[0], merged[-1]):
+        pu = (a + b) / 2 / w
+        width = min(0.24, max(0.12, (b - a) / w * 1.5))
+        legs.append([round(pu + (center - pu) * 0.25, 4), 0.67, round(pu, 4), 0.925, round(width, 4)])
+    return legs
+
+
+def make_view(sprite, marks: dict, kind: str, open_mouth: bool = False, legs: list | None = None) -> dict:
     """Rig di una vista. kind: busto | seduto | serio | dietro."""
     rig = make_rig(sprite, marks, kind, refine=kind != "dietro")
     rig.pop("name", None)
@@ -400,6 +438,12 @@ def make_view(sprite, marks: dict, kind: str, open_mouth: bool = False) -> dict:
         rig.update(face=False, height=round(FULL_HEIGHT * 1.06, 3))
     if open_mouth:
         rig["open_mouth"] = True
+    if kind in ("seduto", "serio"):
+        found = legs if legs is not None else find_legs(sprite, (rig["neck"][0]))
+        if found:
+            rig["legs"] = found
+    elif kind == "dietro" and legs:
+        rig["legs"] = legs
     return rig
 
 
@@ -442,7 +486,7 @@ def update_view(folder: Path, kind: str, points: dict[str, list[float]], species
         marks[key] = {"base": {"x": ear[2], "y": ear[3]},
                       "tip": {"x": (ear[0] - 0.35 * ear[2]) / 0.65, "y": (ear[1] - 0.35 * ear[3]) / 0.65}}
     sprite = cv2.imread(str(folder / old.get("sprite", "sprite.png")), cv2.IMREAD_UNCHANGED)
-    new = make_view(sprite, marks, kind, bool(old.get("open_mouth")))
+    new = make_view(sprite, marks, kind, bool(old.get("open_mouth")), old.get("legs"))
     views[kind] = new
     write_rig(folder, data.get("name", folder.name), species or data.get("species", "cane"), views)
 

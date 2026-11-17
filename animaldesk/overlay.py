@@ -80,7 +80,7 @@ class PetOverlay(QWidget):
         if skin is None:
             return Pet(stats=stats, speed=speed)
         return Pet(stats=stats, speed=speed, bust=True, full=skin.full,
-                   views=tuple(skin.views), species=skin.species)
+                   views=tuple(skin.views), species=skin.species, legs=skin.full and skin.legged)
 
     def dog_rect(self) -> QRectF:
         """Rettangolo cliccabile del cane (per la pelle: solo la parte visibile)."""
@@ -116,6 +116,7 @@ class PetOverlay(QWidget):
         skin, pet = self.skin, self.pet
         pet.bust = skin is not None
         pet.full = bool(skin and skin.full)
+        pet.legs = bool(skin and skin.full and skin.legged)
         pet.views = set(skin.views) if skin else set()
         pet.species = skin.species if skin else "cane"
         pet.carrying_ball = False

@@ -375,6 +375,26 @@ def self_test() -> int:
         if ov.items or ov.ball:
             raise RuntimeError("gli oggetti a terra non spariscono")
         lines.append("figura intera, primo piano, oggetti a tempo: ok")
+        # zampe a figura intera + morph: la tastiera batte a zampe alternate, poi si volta di spalle
+        app.set_framing("intera")
+        if not ov.pet.legs:
+            raise RuntimeError("la pelle di default deve avere le zampe animabili")
+        ov.pet.set_state("typing", 3.0)
+        lifts = set()
+        for _ in range(60):
+            ov._tick()
+            lifts.add(round(ov.pet.pose.lift_l, 1))
+        if max(lifts) < 0.2:
+            raise RuntimeError("le zampe non si muovono a figura intera")
+        ov.pet.set_state("leave", 9.0)
+        morphed = False
+        for _ in range(120):
+            ov._tick()
+            morphed |= bool(ov.skin.prev is not None and ov.skin.morph)
+        ov.grab()
+        if not morphed:
+            raise RuntimeError("il passaggio tra le viste non e' un morph")
+        lines.append("zampe a figura intera e morph tra le viste: ok")
         for outfit in ("santa", "summer", "ski", ""):
             ov.set_outfit(outfit)
             for _ in range(5):

@@ -24,6 +24,9 @@ PAD_HEAD = 0.474    # spazio sopra la testa (cappelli), in "teste" (distanza cim
 PAD_SIDE = 0.14     # spazio ai lati, frazione della larghezza
 MARGIN = 10         # px attorno al buffer per gli spostamenti
 AWAY_SHRINK = 0.45  # quanto rimpicciolisce quando si allontana del tutto
+LEG_LIFT = 0.30     # zampa sollevata al massimo: frazione della lunghezza della gamba
+LEG_SWING = 0.62    # oscillazione al massimo, in radianti (circa 35 gradi)
+MORPH_TIME = 0.55   # durata del morph tra due viste, secondi
 
 # Tutte le misure del rig sono in "teste": cosi' lo stesso codice anima un primo
 # piano (la testa riempie lo sprite) e una figura intera (la testa e' un quarto).
@@ -65,6 +68,8 @@ class Rig:
     full: bool = False                # figura intera appoggiata sul bordo (non un busto affacciato)
     height: float = 1.0               # altezza di disegno rispetto alla taglia scelta
     open_mouth: bool = False          # nella foto la bocca e' gia' aperta (lingua vera in vista)
+    # zampe animabili: (u_attacco, v_attacco, u_piede, v_piede, larghezza) normalizzati, da sinistra a destra
+    legs: list[tuple[float, float, float, float, float]] = field(default_factory=list)
 
     @property
     def head(self) -> float:
@@ -83,6 +88,8 @@ class Rig:
         rig.full = bool(data.get("full", False))
         rig.height = float(data.get("height", 1.0))
         rig.open_mouth = bool(data.get("open_mouth", False))
+        rig.legs = sorted((tuple(float(x) for x in leg) for leg in data.get("legs", []) if len(leg) == 5),
+                          key=lambda g: g[2])[:2]
         return rig
 
 
@@ -98,8 +105,13 @@ class Skin:
         self.brow = self.jaw = self.sink = 0.0
         self.ear = [0.0, 0.0]
         self.ear_v = [0.0, 0.0]
+        self.lift = [0.0, 0.0]          # zampe (figura intera): sollevamento inseguito con inerzia
+        self.swing = [0.0, 0.0]
         self.clock = 0.0
         self._prev = (0.0, 0.0)
+        self._m = MARGIN                # margine del buffer dell'ultimo render (cresce durante il morph)
+        self._ext: tuple[float, float] | None = None
+        self._fields: dict = {}
         # cache dipendenti dalla taglia
         self._size = -1.0
         self._tex: QImage | None = None
@@ -163,16 +175,31 @@ class Skin:
         # griglia: fitta sulla testa (dove si deforma), larga sul corpo
         step = hs / 10.0
         fine_y = self.py + (r.neck[1] + 0.35 * H) * self.sh
+        # zampe: geometria in pixel della texture (attacco, asse unitario, normale, lunghezza, larghezza)
+        self._legs = []
+        leg_y0, leg_x = th + 1.0, []
+        for pu, pv, fu, fv, wu in r.legs:
+            pxv, pyv = self.px + pu * self.sw, self.py + pv * self.sh
+            ax, ay = (fu - pu) * self.sw, (fv - pv) * self.sh
+            ln = math.hypot(ax, ay) or 1.0
+            side = 1.0 if fu < r.neck[0] else -1.0
+            self._legs.append((pxv, pyv, ax / ln, ay / ln, -ay / ln, ax / ln, ln, wu * self.sw, side))
+            leg_y0 = min(leg_y0, pyv - 0.05 * self.sh)
+            leg_x.append((min(pxv, self.px + fu * self.sw) - wu * self.sw * 0.9,
+                          max(pxv, self.px + fu * self.sw) + wu * self.sw * 0.9))
         ys = [0.0]
         while ys[-1] < th - 0.5:
-            ys.append(min(float(th), ys[-1] + (step if ys[-1] < fine_y else step * 3.0)))
+            sy = step if ys[-1] < fine_y else (step * 1.6 if ys[-1] >= leg_y0 else step * 3.0)
+            ys.append(min(float(th), ys[-1] + sy))
         if len(ys) > 2 and ys[-1] - ys[-2] < step * 0.35:
             ys.pop(-2)
         cx = self.px + r.neck[0] * self.sw
         xs = [0.0]
         while xs[-1] < tw - 0.5:
             near = abs(xs[-1] + step * 0.55 - cx) < hs * 1.25
-            xs.append(min(float(tw), xs[-1] + step * (1.1 if near else 2.6)))
+            in_leg = any(a <= xs[-1] <= b for a, b in leg_x)
+            sx = step * (1.1 if near else (1.5 if in_leg else 2.6))
+            xs.append(min(float(tw), xs[-1] + sx))
         if len(xs) > 2 and xs[-1] - xs[-2] < step * 0.35:
             xs.pop(-2)
         self._xs, self._ys = xs, ys
@@ -201,15 +228,15 @@ class Skin:
                 wc = _smooth(r.neck[1] - 0.08 * H, r.neck[1] + 0.29 * H, v) \
                     * (1.0 - _smooth(r.neck[1] + 0.9 * H, r.neck[1] + 1.7 * H, v))
                 self._src.append((x, y))
-                self._weights.append((u, v, wh, depth, we_l, we_r, wb, wj, wc))
+                self._weights.append((u, v, wh, depth, we_l, we_r, wb, wj, wc, self._leg_weights(x, y)))
 
         # celle completamente vuote: non si disegnano
         self._cells = []
         for j in range(len(ys) - 1):
             for i in range(len(xs) - 1):
                 hit = False
-                for fy in (0.1, 0.5, 0.9):
-                    for fx in (0.1, 0.5, 0.9):
+                for fy in (0.06, 0.35, 0.65, 0.94):
+                    for fx in (0.06, 0.35, 0.65, 0.94):
                         xx = min(tw - 1, int(xs[i] + (xs[i + 1] - xs[i]) * fx))
                         yy = min(th - 1, int(ys[j] + (ys[j + 1] - ys[j]) * fy))
                         if static.pixelColor(xx, yy).alpha() > 0:
@@ -218,6 +245,18 @@ class Skin:
                     if hit:
                         break
                 self._cells.append(hit)
+
+    def _leg_weights(self, x: float, y: float) -> tuple[float, ...]:
+        """Quanto ogni zampa trascina il vertice: 0 sul corpo, cresce lungo la gamba, 1 sul piede."""
+        out = []
+        for pxv, pyv, ax, ay, nx, ny, ln, wid, _side in self._legs:
+            dx, dy = x - pxv, y - pyv
+            t = (dx * ax + dy * ay) / ln
+            lat = abs(dx * nx + dy * ny)
+            w_axis = _smooth(0.05, 0.85, t) * (1.0 - _smooth(1.25, 1.55, t))
+            w_lat = 1.0 - _smooth(0.40 * wid, 0.88 * wid, lat)
+            out.append(w_axis * w_lat)
+        return tuple(out)
 
     def uv(self, u: float, v: float) -> QPointF:
         """Da coordinate normalizzate dello sprite a pixel della texture."""
@@ -262,6 +301,10 @@ class Skin:
         self.brow += (pose.brow - self.brow) * min(1.0, dt * 10.0)
         self.jaw += (pose.mouth_open - self.jaw) * min(1.0, dt * 16.0)
         self.sink += (pose.sink - self.sink) * min(1.0, dt * 6.5)
+        kl = min(1.0, dt * 22.0)
+        for n, (lf, sw) in enumerate(((pose.lift_l, pose.swing_l), (pose.lift_r, pose.swing_r))):
+            self.lift[n] += (lf - self.lift[n]) * kl
+            self.swing[n] += (sw - self.swing[n]) * kl
 
         # orecchie: molla smorzata eccitata dai movimenti della testa
         if dt > 0:
@@ -395,7 +438,23 @@ class Skin:
         bl, br = self.uv(r.ear_l[2], r.ear_l[3]), self.uv(r.ear_r[2], r.ear_r[3])
         ear_l, ear_r = math.radians(self.ear[0]), math.radians(self.ear[1])
         out = []
-        for (x, y), (u, v, wh, depth, we_l, we_r, wb, wj, wc) in zip(self._src, self._weights):
+        legs_on = bool(self._legs) and (any(abs(a) > 1e-3 for a in self.lift)
+                                        or any(abs(a) > 1e-3 for a in self.swing))
+        for (x, y), (u, v, wh, depth, we_l, we_r, wb, wj, wc, lw) in zip(self._src, self._weights):
+            # zampe: il piede sale (le gambe si accorciano) e gira attorno all'attacco
+            if legs_on:
+                for n, w in enumerate(lw):
+                    if w <= 0.004 or n > 1:
+                        continue
+                    pxv, pyv, ax, ay, _nx, _ny, ln, _wid, side = self._legs[n]
+                    lf, sw = self.lift[n], self.swing[n]
+                    if abs(lf) < 1e-3 and abs(sw) < 1e-3:
+                        continue
+                    x -= ax * lf * w * LEG_LIFT * ln
+                    y -= ay * lf * w * LEG_LIFT * ln
+                    a = side * (sw * LEG_SWING + lf * 0.12) * w
+                    dx, dy = x - pxv, y - pyv
+                    x, y = pxv + dx * math.cos(a) - dy * math.sin(a), pyv + dx * math.sin(a) + dy * math.cos(a)
             # orecchie (prima: ruotano attorno alla propria base)
             if we_l > 0.02 and ear_l:
                 a = ear_l * we_l
@@ -418,17 +477,25 @@ class Skin:
                 a = roll * wh
                 dx, dy = x - piv.x(), y - piv.y()
                 x, y = piv.x() + dx * math.cos(a) - dy * math.sin(a), piv.y() + dx * math.sin(a) + dy * math.cos(a)
-            out.append((x + MARGIN, y + MARGIN))
+            out.append((x + self._m, y + self._m))
         return out
 
-    def render(self, pose: Pose, size: float) -> QImage:
-        """Il cane deformato su un buffer trasparente (grande quanto la texture + margine)."""
+    def render(self, pose: Pose, size: float, warp: list | None = None, k: float = 0.0) -> QImage:
+        """Il cane deformato su un buffer trasparente (grande quanto la texture + margine).
+
+        `warp` = campo di spostamento verso un'altra vista, `k` quanto applicarlo (morph)."""
         self._prepare(size)
         work = self._work_texture(pose)
         tw, th = self.tw, self.th
-        buf = QImage(tw + 2 * MARGIN, th + 2 * MARGIN, QImage.Format_ARGB32_Premultiplied)
+        self._m = MARGIN
+        if warp is not None and k > 1e-4:
+            self._m = MARGIN + int(self._warp_reach(warp) * k) + 2
+        m = self._m
+        buf = QImage(tw + 2 * m, th + 2 * m, QImage.Format_ARGB32_Premultiplied)
         buf.fill(0)
         dst = self._displace()
+        if warp is not None and k > 1e-4:
+            dst = [(x + k * dx, y + k * dy) for (x, y), (dx, dy) in zip(dst, warp)]
         p = QPainter(buf)
         p.setCompositionMode(QPainter.CompositionMode_Source)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
@@ -464,9 +531,13 @@ class Skin:
         p.end()
         return buf
 
-    def draw(self, painter: QPainter, pose: Pose, size: float) -> None:
+    @staticmethod
+    def _warp_reach(warp: list) -> float:
+        return max((max(abs(dx), abs(dy)) for dx, dy in warp), default=0.0)
+
+    def draw(self, painter: QPainter, pose: Pose, size: float, warp: list | None = None, k: float = 0.0) -> None:
         """Disegna con origine nel punto d'appoggio: (0,0) = centro, bordo inferiore."""
-        buf = self.render(pose, size)
+        buf = self.render(pose, size, warp, k)
         sw, sh = self.sw, self.sh
         osize = sw / 0.913 if self.rig.full else size      # accessori in proporzione alla larghezza
         hop = abs(math.sin(pose.leg_phase)) * size * 0.022 * pose.leg_swing
@@ -496,16 +567,88 @@ class Skin:
         if pose.facing < 0:
             painter.scale(-1.0, 1.0)
         # buffer: lo sprite sta a (px+MARGIN, py+MARGIN); il suo centro-basso va nell'origine
-        painter.drawImage(QPointF(-(self.px + sw / 2 + MARGIN),
-                                  -(self.py + sh + MARGIN) + sh * (self.rig.feet - 1.0)), buf)
+        painter.drawImage(QPointF(-(self.px + sw / 2 + self._m),
+                                  -(self.py + sh + self._m) + sh * (self.rig.feet - 1.0)), buf)
         painter.restore()
 
         if pose.prop or self.outfit:
             from . import outfits
 
-            outfits.draw_front(painter, "" if self.rig.full else pose.prop, self.outfit, self, osize)
+            outfits.draw_front(painter, pose.prop, self.outfit, self, osize, 0.55 if self.rig.full else 1.0)
         self._paws(painter, pose, size)
         painter.restore()
+
+
+    # ------------------------------------------------------------------ morph
+    def _extent(self) -> tuple[float, float]:
+        """Sinistra e destra della sagoma a meta' altezza (0..1), per ancorare il morph."""
+        if self._ext is None:
+            img = self.image
+            lo, hi = 1.0, 0.0
+            for yy in range(int(img.height() * 0.45), int(img.height() * 0.75), 6):
+                for xx in range(0, img.width(), 4):
+                    if img.pixelColor(xx, yy).alpha() > 60:
+                        lo = min(lo, xx / img.width())
+                        break
+                for xx in range(img.width() - 1, -1, -4):
+                    if img.pixelColor(xx, yy).alpha() > 60:
+                        hi = max(hi, xx / img.width())
+                        break
+            self._ext = (lo, hi) if hi > lo else (0.1, 0.9)
+        return self._ext
+
+    def anchors(self, size: float) -> dict[str, tuple[float, float]]:
+        """Parti del corpo riconoscibili, in coordinate di disegno (origine: punto d'appoggio).
+        Due viste si "corrispondono" parte per parte: e' cio' che rende il morph credibile."""
+        r = self.rig
+        sw, sh = size * self.aspect, size
+
+        def pt(u: float, v: float) -> tuple[float, float]:
+            return (u - 0.5) * sw, (v - 1.0) * sh + sh * (r.feet - 1.0)
+
+        out = {"head_top": pt(*r.head_top), "neck": pt(*r.neck), "nose": pt(*r.nose),
+               "mouth": pt(*r.mouth), "ear_l": pt(*r.ear_l[:2]), "ear_r": pt(*r.ear_r[:2]),
+               "foot": pt(0.5, 1.0)}
+        eyes = sorted(r.eyes, key=lambda e: e.x)
+        if len(eyes) >= 2:
+            out["eye_l"], out["eye_r"] = pt(eyes[0].x, eyes[0].y), pt(eyes[-1].x, eyes[-1].y)
+        if len(r.legs) >= 2:
+            out["paw_l"], out["paw_r"] = pt(r.legs[0][2], r.legs[0][3]), pt(r.legs[-1][2], r.legs[-1][3])
+        else:
+            out["paw_l"], out["paw_r"] = pt(0.22, 1.0), pt(0.78, 1.0)
+        lo, hi = self._extent()
+        out["body_l"], out["body_r"] = pt(lo, 0.62), pt(hi, 0.62)
+        out["belly"] = pt((lo + hi) / 2, 0.70)
+        return out
+
+    def field_to(self, other: "Skin", size: float, osize: float) -> list[tuple[float, float]]:
+        """Per ogni vertice: di quanto va spostato per finire sulla vista `other` (interpolazione
+        di Shepard sulle ancore corrispondenti). Calcolato una volta per coppia di viste."""
+        key = (id(other), round(size), round(osize), self.outfit, other.outfit)
+        cached = self._fields.get(key)
+        if cached is not None:
+            return cached
+        self._prepare(size)
+        a, b = self.anchors(size), other.anchors(osize)
+        names = [n for n in a if n in b]
+        pts = [(a[n][0], a[n][1], b[n][0] - a[n][0], b[n][1] - a[n][1]) for n in names]
+        eps = (0.04 * size) ** 2
+        off_x, off_y = self.px + self.sw / 2, self.py + self.sh - self.sh * (self.rig.feet - 1.0)
+        out = []
+        for x, y in self._src:
+            qx, qy = x - off_x, y - off_y
+            nx = ny = den = 0.0
+            for ax, ay, dx, dy in pts:
+                d2 = (qx - ax) ** 2 + (qy - ay) ** 2 + eps
+                w = 1.0 / (d2 * math.sqrt(d2))          # 1 / distanza^3: le ancore vicine comandano
+                nx += w * dx
+                ny += w * dy
+                den += w
+            out.append((nx / den, ny / den))
+        if len(self._fields) > 8:
+            self._fields.clear()
+        self._fields[key] = out
+        return out
 
     def _paws(self, painter: QPainter, pose: Pose, size: float) -> None:
         """Zampe vere appoggiate al bordo: salgono da sotto, battono, si alzano."""
@@ -562,6 +705,7 @@ class SkinSet:
         self.cur = self.home
         self.prev: str | None = None
         self.mix = 1.0
+        self.morph = False          # il passaggio in corso e' un morph (figura intera <-> figura intera)
         self.away = 0.0
         self.outfit = ""
 
@@ -601,6 +745,11 @@ class SkinSet:
     def full(self) -> bool:
         """La vista di casa e' una figura intera?"""
         return self.views[self.home].rig.full
+
+    @property
+    def legged(self) -> bool:
+        """La vista di casa ha le zampe animabili (altrimenti le azioni da zampe usano il primo piano)."""
+        return bool(self.views[self.home].rig.legs)
 
     def has(self, view: str) -> bool:
         return view in self.views
@@ -675,6 +824,8 @@ class SkinSet:
         r = self.view.bounds(size * self.view.rig.height)
         if self.prev and self.mix < 1.0:
             r = r.united(self.views[self.prev].bounds(size * self.views[self.prev].rig.height))
+            if self.morph:
+                r = r.adjusted(-size * 0.25, -size * 0.1, size * 0.25, size * 0.1)
         return r
 
     def point(self, what: str, size: float) -> tuple[float, float]:
@@ -697,13 +848,14 @@ class SkinSet:
             old, new = self.views[self.cur], self.views[want]
             new.yaw, new.pitch, new.roll = old.yaw, old.pitch, old.roll
             new.brow, new.jaw, new.clock = old.brow, old.jaw, old.clock
-            new.sink = 0.0 if new.rig.full else 1.0     # il primo piano sale da sotto il bordo
+            new.lift, new.swing = list(old.lift), list(old.swing)
+            self.morph = old.rig.full and new.rig.full
+            new.sink = old.sink if self.morph else (0.0 if new.rig.full else 1.0)   # primo piano: sale da sotto il bordo
             self.prev, self.cur, self.mix = self.cur, want, 0.0
         self.away += (max(0.0, min(1.0, pose.away)) - self.away) * min(1.0, dt * 14.0)
         if self.prev is not None:
             a, b = self.views[self.prev], self.views[self.cur]
-            slow = not (a.rig.full and b.rig.full)
-            self.mix = min(1.0, self.mix + dt / (0.42 if slow else 0.24))
+            self.mix = min(1.0, self.mix + dt / (MORPH_TIME if self.morph else 0.42))
             if self.mix >= 1.0:
                 self.prev = None
             else:
@@ -720,6 +872,20 @@ class SkinSet:
         painter.save()
         painter.scale(k, k)
         new = self.view
+        if self.prev is not None and self.mix < 1.0 and self.morph:
+            # morph: ogni parte del vecchio scivola sulla parte corrispondente del nuovo (e viceversa);
+            # i colori si fondono solo a cose gia' allineate, quindi non sembra una dissolvenza
+            old = self.views[self.prev]
+            e = _smooth(0.0, 1.0, self.mix)
+            so, sn = size * old.rig.height, size * new.rig.height
+            a_new = _smooth(0.12, 0.58, e)
+            a_old = 1.0 - _smooth(0.60, 0.92, e)
+            painter.setOpacity(fade * a_old)
+            old.draw(painter, pose, so, old.field_to(new, so, sn), e)
+            painter.setOpacity(fade * a_new)
+            new.draw(painter, pose, sn, new.field_to(old, sn, so), 1.0 - e)
+            painter.restore()
+            return
         if self.prev is not None and self.mix < 1.0:
             old = self.views[self.prev]
             # il nuovo compare sopra il vecchio, poi il vecchio svanisce: mai "trasparente"

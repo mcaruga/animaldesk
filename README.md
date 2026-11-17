@@ -18,14 +18,29 @@ originale, nessun asset di terze parti.
 ### Piu' foto, piu' viste
 
 Una pelle e' fatta di **viste**, una per foto. Ogni azione chiede la vista che le
-serve e il passaggio dall'una all'altra e' una dissolvenza, mai uno scatto.
+serve e il passaggio dall'una all'altra e' un **morph** (come in PowerPoint): testa,
+occhi, naso, zampe e sagoma di una foto scivolano sulle parti corrispondenti
+dell'altra, e i colori si fondono solo a cose gia' allineate. Non e' una dissolvenza.
 
 | Vista | Foto | A cosa serve |
 |---|---|---|
-| `seduto` | figura intera di fronte, espressione allegra | la posa di tutti i giorni: guarda, inclina la testa, strizza gli occhi, abbaia |
+| `seduto` | figura intera di fronte, espressione allegra | la posa di tutti i giorni e tutte le azioni, **zampe comprese** |
 | `serio` | figura intera di fronte, faccia seria | **Non ho voglia**, **Fai la cacca** |
-| `dietro` | figura intera di spalle | **Me ne vado** e ogni spostamento |
-| `busto` | primo piano di testa e petto | scrive alla tastiera, nascondino, lecca la zampa, nanna, linguetta, dispetto |
+| `dietro` | figura intera di spalle | **Me ne vado** e ogni spostamento (con il passo) |
+| `busto` | primo piano di testa e petto | solo con l'inquadratura *Primo piano* (o per animali senza zampe rilevate) |
+
+### Zampe a figura intera
+
+Ogni vista a figura intera ha nel rig le sue `legs`: attacco, piede e larghezza di
+ciascuna zampa. La mesh le muove da sola: il piede sale (la gamba si accorcia
+dall'attacco in giu') e gira verso il petto o in fuori, mentre petto e corpo
+restano fermi. Cosi' ogni azione usa le zampe anche a figura intera: la tastiera
+si batte a zampe alternate (con la tastiera davanti), la leccata porta la zampa
+al muso, la grattata gratta il collo, "nanana" le alza una dopo l'altra, abbaiare
+fa sobbalzare, presa in mano penzola, ogni tanto sposta il peso a riposo, e di
+spalle fa il passo. Il nascondino lo fa scendere sotto il bordo.
+Per le pelle create dall'app le zampe si trovano dalla sagoma (i due piedi piu'
+esterni); se non ne trova, le azioni ripiegano sul primo piano.
 
 Menu **Inquadratura**: *Figura intera* (seduto sul bordo dello schermo) oppure
 *Primo piano* (affacciato dal bordo, come nella versione 1.1). Se una vista manca
@@ -200,7 +215,7 @@ i click al desktop.
 display.
 
 ```bash
-python -m pytest -q      # 112 test
+python -m pytest -q      # 139 test
 ```
 
 ## Licenza

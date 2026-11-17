@@ -94,9 +94,11 @@ class Pet:
     """Il golden retriever. x = centro, y = zampe (suolo)."""
 
     def __init__(self, stats: Stats | None = None, speed: float = 1.0, bust: bool = False,
-                 full: bool = False, views: tuple[str, ...] | set[str] = (), species: str = "cane") -> None:
+                 full: bool = False, views: tuple[str, ...] | set[str] = (), species: str = "cane",
+                 legs: bool = False) -> None:
         self.bust = bust              # pelle fotografica: niente salti, capriole, scavi
         self.full = full              # figura intera: non cammina, va via di spalle e ricompare
+        self.legs = legs              # la figura intera ha le zampe animabili: niente primo piano per le azioni
         self.views = set(views)
         self.species = species
         self._trav: list | None = None    # spostamento in corso [tempo, x d'arrivo, gia' spostato]
@@ -784,15 +786,50 @@ class Pet:
         k = min(a, b)
         return k * k * (3.0 - 2.0 * k)
 
+    def _leg_pose(self, p: Pose, st: str, t: float, e: float) -> None:
+        """Zampe della figura intera (mesh): `lift` alza il piede, `swing` lo porta in fuori (+) o
+        verso il petto (-). Con una sola gamba (di spalle) vale la sinistra."""
+        if st == "typing":                                  # zampe che battono, alternate
+            tap = math.sin(t * 15.0)
+            p.lift_l, p.lift_r = 0.55 * max(0.0, tap) * e, 0.55 * max(0.0, -tap) * e
+            p.swing_l = p.swing_r = -0.12 * e
+        elif st == "lick":                                  # porta la zampa al muso
+            p.lift_r, p.swing_r = 0.80 * e, -0.60 * e
+            p.lift_l = 0.10 * e * max(0.0, math.sin(t * 3.0))
+        elif st == "scratch":                               # zampa che gratta il collo
+            p.lift_r = 0.72 * e
+            p.swing_r = (-0.42 + 0.22 * math.sin(t * 22.0)) * e
+        elif st == "boop":                                  # zampette contente
+            pat = math.sin(t * 9.0)
+            p.lift_l, p.lift_r = 0.30 * max(0.0, pat) * e, 0.30 * max(0.0, -pat) * e
+        elif st == "tease":                                 # "nanana": una zampa e l'altra
+            pat = math.sin(t * 5.2)
+            p.lift_l, p.lift_r = 0.62 * max(0.0, pat) * e, 0.62 * max(0.0, -pat) * e
+            p.swing_l, p.swing_r = 0.34 * max(0.0, pat) * e, 0.34 * max(0.0, -pat) * e
+        elif st == "bark":                                  # sobbalza a ogni latrato
+            hop = max(0.0, 1.0 - ((t * 2.4) % 1.0) * 3.0)
+            p.lift_l = p.lift_r = 0.30 * hop
+        elif st == "dragged":                               # preso in mano: penzola
+            p.lift_l, p.lift_r = 0.5 + 0.5 * math.sin(t * 13.0), 0.5 + 0.5 * math.sin(t * 13.0 + 2.2)
+            p.swing_l, p.swing_r = 0.35 * math.sin(t * 9.0), -0.35 * math.sin(t * 9.0 + 1.0)
+        elif st in ("sit", "idle", "look", "tilt", "squint", "nope"):
+            # a riposo non e' una statua: ogni tanto sposta il peso su una zampa
+            shift = max(0.0, math.sin(t * 0.55 + 1.3)) ** 6
+            p.lift_l = 0.12 * shift
+            p.swing_l = 0.10 * shift
+
     def _rig_pose(self, p: Pose) -> None:
         """Campi usati dalla pelle fotografica (testa che gira, zampe, lingua...)."""
         st, t, e = self.state, self.t, self._ease()
-        if self.full and self.close and st in CLOSE_UPS:
-            p.view = "busto"                    # viene vicino: le zampe arrivano sul bordo
+        if self.full and self.close and not self.legs and st in CLOSE_UPS:
+            p.view = "busto"                    # senza zampe animabili: viene vicino, le zampe arrivano sul bordo
         if st == "sleep":
             p.sink = 0.36
-            if not self.close:
+            if not self.close or self.legs:
                 p.pitch = 0.55
+                if self.legs:
+                    p.sink = 0.0
+                    p.head_tilt = 6.0 * math.sin(t * 0.6)
         elif st == "bark":
             beat = (t * 2.4) % 1.0
             p.pitch = -0.55 * (1.0 - beat)
@@ -863,6 +900,7 @@ class Pet:
                 gone = k * k * (3.0 - 2.0 * k)
                 p.view = "dietro"
                 p.away = gone
+                p.lift_l = 0.45 * max(0.0, math.sin(self.leg_phase)) * (1.0 - 0.5 * gone)
                 p.body_tilt = math.sin(self.leg_phase) * 9.0 * (1.0 - gone)
                 p.body_bob = -abs(math.sin(self.leg_phase)) * 3.0
                 if "dietro" not in self.views and not self.full:
@@ -898,12 +936,16 @@ class Pet:
                 p.eye_open = min(p.eye_open, 1.0 - 0.55 * k)
                 p.brow = 0.4 * k
 
+        if self.legs and self.full:
+            self._leg_pose(p, st, t, e)
+
         if self._trav is not None:                         # in viaggio: via di spalle, poi ritorno
             tt = self._trav[0]
             if tt < TRAVEL_OUT:
                 k = tt / TRAVEL_OUT
                 p.view = "dietro"
                 p.away = k * k * (3.0 - 2.0 * k)
+                p.lift_l = 0.45 * max(0.0, math.sin(self.leg_phase))
                 p.body_tilt = math.sin(self.leg_phase) * 9.0 * (1.0 - p.away)
             else:
                 k = min(1.0, (tt - TRAVEL_OUT) / TRAVEL_IN)
@@ -911,7 +953,7 @@ class Pet:
                 p.away = 1.0 - k * k * (3.0 - 2.0 * k)
             p.body_bob = -abs(math.sin(self.leg_phase)) * 3.0
             p.yaw = p.pitch = p.head_tilt = 0.0
-        if self.full and p.view != "busto" and p.sink > 0.0:
+        if self.full and p.view != "busto" and p.sink > 0.0 and not (self.legs and st == "hide"):
             # la figura intera non "scende sotto il bordo": semmai si allontana
             if not self.close:
                 p.away = max(p.away, min(1.0, p.sink))
