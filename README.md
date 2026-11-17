@@ -66,14 +66,14 @@ intorno, **testa di lato**, grattata, occhi felici, linguetta, dispetto, abbaia,
 - **Sdraiati** — (se c'e' la foto `sdraiato`) si sdraia con un morph, si guarda
   intorno, sorride con la lingua, ogni tanto allunga una zampa.
 - **Dormi** usa la foto `dorme` se c'e': si accoccola davvero, con il respiro.
-- **Scrivi alla tastiera** e **Dormi** restano in primo piano quando la pelle ha la foto `busto` (come il golden): da vicino sono piu' belle. Le altre azioni con le zampe restano a figura intera.
+- Tastiera, leccata, nanna, nascondino, linguetta e dispetto si fanno **in primo piano** quando la pelle ha la foto `busto` (zampa vera alla bocca, zampe che battono sulla tastiera). Le altre azioni muovono le zampe a figura intera.
 
 ### Pelli incluse
 
 | Pelle | Viste | Note |
 |---|---|---|
 | `golden-reale` | seduto, serio, di spalle, primo piano | il golden |
-| `olaf` | seduto (in smoking), sdraiato, dorme | barboncino. Testa di tre quarti: un occhio e' nascosto dal muso (`"hidden": true`, niente palpebra). Senza foto di spalle, per andarsene e spostarsi scende sotto il bordo e risale altrove. La medaglietta e' ridipinta: niente numeri di telefono negli sprite |
+| `olaf` | primo piano, seduto (in smoking), sdraiato, dorme | barboncino. Nel `rig.json` del primo piano `paw_scale`/`paw_reach` adattano zampe e leccata al suo muso. Testa di tre quarti: un occhio e' nascosto dal muso (`"hidden": true`, niente palpebra). Senza foto di spalle, per andarsene e spostarsi scende sotto il bordo e risale altrove. La medaglietta e' ridipinta: niente numeri di telefono negli sprite |
 
 Si sceglie da **Aspetto → Foto: ...**.
 
@@ -228,7 +228,7 @@ i click al desktop.
 display.
 
 ```bash
-python -m pytest -q      # 151 test
+python -m pytest -q      # 156 test
 ```
 
 ## Licenza

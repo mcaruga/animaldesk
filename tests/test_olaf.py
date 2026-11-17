@@ -43,9 +43,10 @@ def _opaque(img, step=4):
 
 
 def test_olaf_ha_le_sue_viste(olaf):
-    assert set(olaf.views) == {"seduto", "sdraiato", "dorme"}
+    assert set(olaf.views) == {"busto", "seduto", "sdraiato", "dorme"}
     assert olaf.home == "seduto" and olaf.full and olaf.legged
-    assert olaf.framings() == ["intera"]
+    assert olaf.framings() == ["intera", "busto"]
+    assert olaf.views["busto"].paw is not None              # la sua zampa vera per tastiera e leccata
     assert len(olaf.views["sdraiato"].rig.legs) == 2
     assert not olaf.views["dorme"].rig.face            # dorme a occhi chiusi: niente palpebre
     for name, v in olaf.views.items():
@@ -65,7 +66,7 @@ def test_l_occhio_nascosto_non_ha_palpebra(olaf):
     assert open_eyes == closed
 
 
-@pytest.mark.parametrize("view", ["seduto", "sdraiato", "dorme"])
+@pytest.mark.parametrize("view", ["busto", "seduto", "sdraiato", "dorme"])
 def test_ogni_vista_di_olaf_disegna(olaf, view):
     olaf.cur = view
     for _ in range(20):
@@ -75,12 +76,12 @@ def test_ogni_vista_di_olaf_disegna(olaf, view):
 
 def test_le_teste_hanno_la_stessa_misura(olaf):
     """Passando da una vista all'altra il cane non deve cambiare taglia: stessa testa."""
-    heads = [v.rig.head * v.rig.height for k, v in olaf.views.items() if k != "dorme"]
+    heads = [v.rig.head * v.rig.height for k, v in olaf.views.items() if k not in ("dorme", "busto")]
     assert max(heads) / min(heads) < 1.15
 
 
 def _pet():
-    return Pet(bust=True, full=True, views=("seduto", "sdraiato", "dorme"), legs=True)
+    return Pet(bust=True, full=True, views=("busto", "seduto", "sdraiato", "dorme"), legs=True)
 
 
 def _pose(pet, state, t):

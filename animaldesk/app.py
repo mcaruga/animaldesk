@@ -380,14 +380,14 @@ def self_test() -> int:
         app.set_framing("intera")
         if not ov.pet.legs:
             raise RuntimeError("la pelle di default deve avere le zampe animabili")
-        ov.pet.set_state("tease", 3.0)
+        ov.pet.set_state("scratch", 3.0)
         lifts = set()
         for _ in range(60):
             ov._tick()
-            lifts.add(round(ov.pet.pose.lift_l, 1))
+            lifts.add(round(max(ov.pet.pose.lift_l, ov.pet.pose.lift_r), 1))
         if max(lifts) < 0.2 or ov.skin.cur == "busto":
             raise RuntimeError("le zampe non si muovono a figura intera")
-        for state in ("typing", "sleep"):            # queste restano in primo piano
+        for state in ("typing", "lick", "sleep"):    # queste in primo piano
             ov.pet.set_state(state, 4.0)
             for _ in range(30):
                 ov._tick()
@@ -404,7 +404,7 @@ def self_test() -> int:
         lines.append("zampe a figura intera e morph tra le viste: ok")
         # seconda pelle: Olaf (seduto, sdraiato, dorme; niente foto di spalle)
         app.set_skin("olaf")
-        if ov.skin is None or set(ov.skin.views) != {"seduto", "sdraiato", "dorme"}:
+        if ov.skin is None or set(ov.skin.views) != {"busto", "seduto", "sdraiato", "dorme"}:
             raise RuntimeError("la pelle di Olaf non e' nel pacchetto")
         seen = set()
         for _, action in PHOTO_ACTIONS:
@@ -413,10 +413,10 @@ def self_test() -> int:
                 ov._tick()
                 seen.add(ov.skin.cur)
             ov.grab()
-        if not {"sdraiato", "dorme"} <= seen:
+        if not {"busto", "sdraiato", "dorme"} <= seen:
             raise RuntimeError(f"Olaf non usa le sue foto: viste viste {sorted(seen)}")
         app.set_skin("golden-reale")
-        lines.append("Olaf: seduto, sdraiato, dorme: ok")
+        lines.append("Olaf: primo piano, seduto, sdraiato, dorme: ok")
         for outfit in ("santa", "summer", "ski", ""):
             ov.set_outfit(outfit)
             for _ in range(5):

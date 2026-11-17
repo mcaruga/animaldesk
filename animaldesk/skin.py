@@ -69,6 +69,8 @@ class Rig:
     full: bool = False                # figura intera appoggiata sul bordo (non un busto affacciato)
     height: float = 1.0               # altezza di disegno rispetto alla taglia scelta
     open_mouth: bool = False          # nella foto la bocca e' gia' aperta (lingua vera in vista)
+    paw_scale: float = 1.0            # primo piano: grandezza delle zampe sul bordo
+    paw_reach: float = 0.20           # primo piano: quanto sale la zampa verso la bocca (leccata)
     # zampe animabili: (u_attacco, v_attacco, u_piede, v_piede, larghezza) normalizzati, da sinistra a destra
     legs: list[tuple[float, float, float, float, float]] = field(default_factory=list)
 
@@ -89,6 +91,8 @@ class Rig:
         rig.full = bool(data.get("full", False))
         rig.height = float(data.get("height", 1.0))
         rig.open_mouth = bool(data.get("open_mouth", False))
+        rig.paw_scale = float(data.get("paw_scale", 1.0))
+        rig.paw_reach = float(data.get("paw_reach", 0.20))
         rig.legs = sorted((tuple(float(x) for x in leg) for leg in data.get("legs", []) if len(leg) == 5),
                           key=lambda g: g[2])[:2]
         return rig
@@ -657,13 +661,13 @@ class Skin:
         """Zampe vere appoggiate al bordo: salgono da sotto, battono, si alzano."""
         if self.paw is None or self.rig.full or pose.paws <= 0.02:
             return
-        ph = size * 0.38
+        ph = size * 0.38 * self.rig.paw_scale
         pw = ph * self.paw.width() / self.paw.height()
         spread = self.sw * 0.21
         for side, lift in ((-1, pose.paw_l), (1, pose.paw_r)):
             reach = pose.paw_reach if side > 0 else 0.0
             x = side * spread * (1.0 - 0.55 * reach)
-            y = (1.0 - pose.paws) * ph * 1.05 - lift * size * 0.045 - reach * size * 0.20
+            y = (1.0 - pose.paws) * ph * 1.05 - lift * size * 0.045 - reach * size * self.rig.paw_reach
             painter.save()
             painter.translate(x, y + ph * 0.10)
             shade = QRadialGradient(pw * 0.10, -ph * 0.42, pw * 0.85)
