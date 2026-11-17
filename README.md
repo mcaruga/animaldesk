@@ -143,7 +143,8 @@ guinzaglio e pupazzo sono stati tolti a mano).
 
 | Comportamento | Cosa vedi |
 |---|---|
-| `idle` | respira, sbatte le palpebre, scodinzola |
+| `idle` | respira, sbatte le palpebre, scodinzola, e segue il cursore con lo sguardo |
+| `wander` | gironzola: la figura intera cammina di spalle verso un punto nuovo e ricompare lì |
 | `walk` / `run` | cammina e corre sul bordo inferiore dello schermo, lingua fuori quando corre |
 | `sit` | si siede |
 | `sleep` | si sdraia e fa `z z z` (recupera energia) |
@@ -230,7 +231,7 @@ i click al desktop.
 display.
 
 ```bash
-python -m pytest -q      # 158 test
+python -m pytest -q      # 159 test
 ```
 
 ## Licenza

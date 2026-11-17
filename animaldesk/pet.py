@@ -302,6 +302,28 @@ class Pet:
         if self.t >= self.duration:
             self.set_state("idle", 2.0)
 
+    def _enter_wander(self) -> None:
+        """Gironzola: sceglie un punto e ci va. La figura intera cammina di spalle
+        (zampe in movimento) e ricompare li'; il busto scorre lungo il bordo."""
+        self.vx = 0.0
+        self.duration = 9.0
+        self._wander_x = None
+
+    def _do_wander(self, dt: float, world: World) -> None:
+        if self._wander_x is None:
+            margin = 120.0 * world.scale
+            lo, hi = world.left + margin, max(world.left + margin + 1, world.right - margin)
+            x = self.x
+            for _ in range(6):                              # un punto abbastanza lontano
+                x = random.uniform(lo, hi)
+                if abs(x - self.x) > 220.0 * world.scale:
+                    break
+            self._wander_x = x
+        if self._goto(dt, self._wander_x, world, 40.0 * world.scale, WALK_SPEED):
+            self.set_state("idle", random.uniform(1.5, 3.0))
+        elif self.t >= self.duration and self._trav is None:
+            self.set_state("idle", 1.5)
+
     def _enter_poop(self) -> None:
         self.vx = 0.0
         self.duration = 7.2
@@ -687,12 +709,12 @@ class Pet:
                 "walk": 20.0, "sit": 12.0, "idle": 8.0, "look": 12.0, "tilt": 12.0,
                 "squint": 8.0, "boop": 8.0, "tease": 5.0, "typing": 7.0, "hide": 6.0,
                 "lick": 7.0, "scratch": 6.0, "bark": 6.0, "chase": 4.0, "sleep": 3.0, "eat": 2.0,
-                "nope": 3.0, "leave": 2.5, "poop": 1.0, "rest": 0.0,
+                "nope": 3.0, "leave": 2.5, "poop": 1.0, "rest": 0.0, "wander": 0.0,
             }
             if "sdraiato" in self.views:
                 weights["rest"] = 7.0
-            if self.full:                      # niente camminata: resta piu' spesso a guardarsi intorno
-                weights.update(walk=0.0, chase=0.0, idle=16.0, sit=8.0, look=14.0)
+            if self.full:                      # la camminata di lato non c'e': gironzola di spalle
+                weights.update(walk=0.0, chase=0.0, idle=13.0, sit=7.0, look=12.0, wander=16.0)
                 if not self.close and not self.legs:
                     for k in ("typing", "lick"):
                         weights[k] = 0.0

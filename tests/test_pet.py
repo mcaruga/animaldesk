@@ -66,6 +66,24 @@ def test_sceglie_di_mangiare_se_affamato(world):
     assert pet.choose_behavior(world) == "eat"
 
 
+def test_gironzola_e_cambia_posto(world):
+    """La figura intera col 'dietro' cammina di spalle verso un nuovo punto e ci arriva."""
+    pet = Pet(bust=True, full=True, views=("busto", "seduto", "serio", "dietro"))
+    pet.x, pet.y = 500.0, world.ground
+    start = pet.x
+    pet.set_state("wander", 9.0)
+    saw_back = moved_away = False
+    for _ in range(400):
+        pose = pet.update(1 / 30, world)
+        if pet._trav is not None:
+            saw_back |= pose.view == "dietro"       # mostra il ciclo di spalle
+            moved_away |= pose.away > 0.2
+        if pet.state == "idle":
+            break
+    assert saw_back and moved_away
+    assert abs(pet.x - start) > 100.0               # e' finito altrove
+
+
 def test_da_fermo_la_testa_segue_il_cursore(world):
     """Idle: il muso si gira verso il puntatore (destra -> yaw positivo, sinistra -> negativo)."""
     pet = Pet(bust=True, full=True, views=("busto", "seduto", "serio", "dietro"))
