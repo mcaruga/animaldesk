@@ -49,6 +49,7 @@ class Eye:
     ry: float
     angle: float = 0.0
     lid: str = "#C8A47C"
+    hidden: bool = False      # nascosto dal muso (testa di tre quarti): niente palpebra da disegnare
 
 
 @dataclass
@@ -339,6 +340,8 @@ class Skin:
         """Palpebra: pelo vero (preso appena sopra l'occhio) che scende, con bordi sfumati."""
         tex = self._tex
         for eye in self.rig.eyes:
+            if eye.hidden:
+                continue
             c = self.uv(eye.x, eye.y)
             rx, ry = eye.rx * self.sw, eye.ry * self.sh
             bw, bh = int(rx * 2.6) + 2, int(ry * 2.8) + 2
@@ -681,6 +684,7 @@ FALLBACK = {
     "serio": ("seduto",),
     "seduto": ("serio",),
     "sdraiato": ("seduto", "serio"),
+    "dorme": ("sdraiato",),
     "dietro": (),
     "busto": (),
 }

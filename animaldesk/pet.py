@@ -72,6 +72,7 @@ BUBBLES = {
     "sigh": ["Uff.", "*sospiro*", "Mh."],
     "poop": ["Un attimo...", "Non guardare!", "Occupato."],
     "relief": ["Fatto!", "Ahh...", "Molto meglio."],
+    "rest": ["Che relax.", "Qui sto bene.", "*si stiracchia*"],
     "treat": ["Biscotto!", "Gnam!", "Ancora?"],
 }
 
@@ -283,6 +284,17 @@ class Pet:
         self._side = random.choice((-1, 1))
         self._moved = False
         self.say("nope")
+
+    def _enter_rest(self) -> None:
+        self.vx = 0.0
+        self.duration = random.uniform(9.0, 15.0)
+        self._side = random.choice((-1, 1))
+        self.say("rest")
+
+    def _do_rest(self, dt: float, world: World) -> None:
+        self.vx = 0.0
+        if self.t >= self.duration:
+            self.set_state("idle", 2.0)
 
     def _enter_poop(self) -> None:
         self.vx = 0.0
@@ -651,11 +663,13 @@ class Pet:
                 "walk": 20.0, "sit": 12.0, "idle": 8.0, "look": 12.0, "tilt": 12.0,
                 "squint": 8.0, "boop": 8.0, "tease": 5.0, "typing": 7.0, "hide": 6.0,
                 "lick": 7.0, "scratch": 6.0, "bark": 6.0, "chase": 4.0, "sleep": 3.0, "eat": 2.0,
-                "nope": 3.0, "leave": 2.5, "poop": 1.0,
+                "nope": 3.0, "leave": 2.5, "poop": 1.0, "rest": 0.0,
             }
+            if "sdraiato" in self.views:
+                weights["rest"] = 7.0
             if self.full:                      # niente camminata: resta piu' spesso a guardarsi intorno
                 weights.update(walk=0.0, chase=0.0, idle=16.0, sit=8.0, look=14.0)
-                if not self.close:
+                if not self.close and not self.legs:
                     for k in ("typing", "lick"):
                         weights[k] = 0.0
             weights["sleep"] += max(0.0, (40 - s.energia) * 0.6)
@@ -812,6 +826,10 @@ class Pet:
         elif st == "dragged":                               # preso in mano: penzola
             p.lift_l, p.lift_r = 0.5 + 0.5 * math.sin(t * 13.0), 0.5 + 0.5 * math.sin(t * 13.0 + 2.2)
             p.swing_l, p.swing_r = 0.35 * math.sin(t * 9.0), -0.35 * math.sin(t * 9.0 + 1.0)
+        elif st == "rest":                                  # sdraiato: ogni tanto allunga una zampa
+            p.lift_l = 0.55 * max(0.0, math.sin(t * 0.9)) ** 4
+            p.lift_r = 0.55 * max(0.0, math.sin(t * 0.9 + 2.4)) ** 4
+            p.swing_r = 0.25 * max(0.0, math.sin(t * 0.9 + 2.4)) ** 4
         elif st in ("sit", "idle", "look", "tilt", "squint", "nope"):
             # a riposo non e' una statua: ogni tanto sposta il peso su una zampa
             shift = max(0.0, math.sin(t * 0.55 + 1.3)) ** 6
@@ -823,7 +841,9 @@ class Pet:
         st, t, e = self.state, self.t, self._ease()
         if self.full and self.close and not self.legs and st in CLOSE_UPS:
             p.view = "busto"                    # senza zampe animabili: viene vicino, le zampe arrivano sul bordo
-        if st == "sleep":
+        if st == "sleep" and "dorme" in self.views and self.full:
+            p.view = "dorme" if t > 0.6 else ""          # si accoccola: morph sulla foto di lui che dorme
+        elif st == "sleep":
             p.sink = 0.36
             if not self.close or self.legs:
                 p.pitch = 0.55
@@ -853,10 +873,18 @@ class Pet:
             p.pitch = -0.30 * e
         elif st == "boop":
             p.tongue = 0.36 * e
+        elif st == "rest":
+            p.view = "sdraiato"
+            p.yaw = self._side * 0.45 * math.sin(t * 0.5) * e
+            p.pitch = 0.12 * math.sin(t * 0.37 + 1.0) * e
+            p.head_tilt = 5.0 * math.sin(t * 0.29) * e
+            if 3.0 < t % 7.0 < 4.6:                       # ogni tanto: sorriso con la lingua
+                p.mouth_open = 0.35 * e
+                p.tongue = 0.55 * e
         elif st == "tease":
             p.tongue = 0.75 * e
             p.head_tilt = 10.0 * math.sin(t * 5.2) * e
-            p.sink = 0.10 * abs(math.sin(t * 5.2)) * e
+            p.sink = 0.10 * abs(math.sin(t * 5.2)) * e if not self.full else 0.0
             p.brow = 0.7 * e
         elif st == "typing":
             p.paws = e
@@ -903,13 +931,14 @@ class Pet:
                 p.lift_l = 0.45 * max(0.0, math.sin(self.leg_phase)) * (1.0 - 0.5 * gone)
                 p.body_tilt = math.sin(self.leg_phase) * 9.0 * (1.0 - gone)
                 p.body_bob = -abs(math.sin(self.leg_phase)) * 3.0
-                if "dietro" not in self.views and not self.full:
+                if "dietro" not in self.views:
+                    p.view = ""
                     p.away, p.sink = 0.0, 1.05 * gone     # senza foto di spalle: scende sotto il bordo
             else:
                 k = min(1.0, (t - back) / 1.3)
                 p.away = 1.0 - k * k * (3.0 - 2.0 * k)
                 p.body_bob = -abs(math.sin(self.leg_phase)) * 3.0 * (1.0 - k)
-                if "dietro" not in self.views and not self.full:
+                if "dietro" not in self.views:
                     p.sink, p.away = 1.05 * p.away, 0.0
         elif st == "nope":
             turn = min(1.0, max(0.0, (t - 1.0) / 1.2))
@@ -941,7 +970,11 @@ class Pet:
 
         if self._trav is not None:                         # in viaggio: via di spalle, poi ritorno
             tt = self._trav[0]
-            if tt < TRAVEL_OUT:
+            if "dietro" not in self.views:                 # senza foto di spalle: giu' e su dal bordo
+                k = min(1.0, tt / TRAVEL_OUT) if tt < TRAVEL_OUT else 1.0 - min(1.0, (tt - TRAVEL_OUT) / TRAVEL_IN)
+                p.view, p.away = "", 0.0
+                p.sink = 1.05 * k * k * (3.0 - 2.0 * k)
+            elif tt < TRAVEL_OUT:
                 k = tt / TRAVEL_OUT
                 p.view = "dietro"
                 p.away = k * k * (3.0 - 2.0 * k)
@@ -953,7 +986,7 @@ class Pet:
                 p.away = 1.0 - k * k * (3.0 - 2.0 * k)
             p.body_bob = -abs(math.sin(self.leg_phase)) * 3.0
             p.yaw = p.pitch = p.head_tilt = 0.0
-        if self.full and p.view != "busto" and p.sink > 0.0 and not (self.legs and st == "hide"):
+        if self.full and p.view != "busto" and p.sink > 0.0 and not self.legs and "dietro" in self.views:
             # la figura intera non "scende sotto il bordo": semmai si allontana
             if not self.close:
                 p.away = max(p.away, min(1.0, p.sink))

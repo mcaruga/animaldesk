@@ -255,10 +255,14 @@ def test_azioni_da_primo_piano_chiedono_il_busto(world):
 
 
 def test_figura_intera_senza_primo_piano(world):
+    pet = Pet(bust=True, full=True, views=("seduto", "dietro"))
+    pet.set_state("hide")
+    _run(pet, world, 2.0)
+    assert pet.pose.sink == 0.0 and pet.pose.away > 0.9      # con la foto di spalle: si allontana
     pet = Pet(bust=True, full=True, views=("seduto",))
     pet.set_state("hide")
     _run(pet, world, 2.0)
-    assert pet.pose.sink == 0.0 and pet.pose.away > 0.9      # non scende: si allontana
+    assert pet.pose.sink > 0.9 and pet.pose.away == 0.0      # senza: scende sotto il bordo
     for _ in range(300):
         assert pet.choose_behavior(world) not in ("typing", "lick")
 

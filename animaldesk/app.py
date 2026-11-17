@@ -44,6 +44,7 @@ PHOTO_ACTIONS = [      # pelle fotografica (affacciato dal bordo)
     ("Non ho voglia", "nope"),
     ("Me ne vado", "leave"),
     ("Fai la cacca", "poop"),
+    ("Sdraiati", "rest"),
 ]
 
 VOICE = {"cane": "Abbaia", "gatto": "Miagola"}          # stessa azione, verso diverso
@@ -120,7 +121,7 @@ class AnimalDeskApp:
         look = menu.addMenu("Aspetto")
         look_group = QActionGroup(look)
         for name in list_skins():
-            act = look.addAction(f"Foto: {name}")
+            act = look.addAction(f"Foto: {name.replace('-', ' ').capitalize()}")
             act.setCheckable(True)
             act.setActionGroup(look_group)
             act.setChecked(self.config.skin == name)
@@ -395,6 +396,21 @@ def self_test() -> int:
         if not morphed:
             raise RuntimeError("il passaggio tra le viste non e' un morph")
         lines.append("zampe a figura intera e morph tra le viste: ok")
+        # seconda pelle: Olaf (seduto, sdraiato, dorme; niente foto di spalle)
+        app.set_skin("olaf")
+        if ov.skin is None or set(ov.skin.views) != {"seduto", "sdraiato", "dorme"}:
+            raise RuntimeError("la pelle di Olaf non e' nel pacchetto")
+        seen = set()
+        for _, action in PHOTO_ACTIONS:
+            ov.command(action)
+            for _ in range(45):
+                ov._tick()
+                seen.add(ov.skin.cur)
+            ov.grab()
+        if not {"sdraiato", "dorme"} <= seen:
+            raise RuntimeError(f"Olaf non usa le sue foto: viste viste {sorted(seen)}")
+        app.set_skin("golden-reale")
+        lines.append("Olaf: seduto, sdraiato, dorme: ok")
         for outfit in ("santa", "summer", "ski", ""):
             ov.set_outfit(outfit)
             for _ in range(5):

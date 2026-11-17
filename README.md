@@ -63,6 +63,18 @@ intorno, **testa di lato**, grattata, occhi felici, linguetta, dispetto, abbaia,
   torna, da un'altra parte.
 - **Fai la cacca** — ti fissa serissimo, si accuccia appena, lascia il ricordino,
   due zampate di terra e (spesso) si allontana fischiettando.
+- **Sdraiati** — (se c'e' la foto `sdraiato`) si sdraia con un morph, si guarda
+  intorno, sorride con la lingua, ogni tanto allunga una zampa.
+- **Dormi** usa la foto `dorme` se c'e': si accoccola davvero, con il respiro.
+
+### Pelli incluse
+
+| Pelle | Viste | Note |
+|---|---|---|
+| `golden-reale` | seduto, serio, di spalle, primo piano | il golden |
+| `olaf` | seduto (in smoking), sdraiato, dorme | barboncino. Testa di tre quarti: un occhio e' nascosto dal muso (`"hidden": true`, niente palpebra). Senza foto di spalle, per andarsene e spostarsi scende sotto il bordo e risale altrove. La medaglietta e' ridipinta: niente numeri di telefono negli sprite |
+
+Si sceglie da **Aspetto → Foto: ...**.
 
 Lo sguardo segue il puntatore quando e' vicino, e la palla mentre rimbalza. Gli
 spostamenti del viso sono limitati di proposito e misurati in "teste", cosi'
@@ -215,7 +227,7 @@ i click al desktop.
 display.
 
 ```bash
-python -m pytest -q      # 139 test
+python -m pytest -q      # 150 test
 ```
 
 ## Licenza
