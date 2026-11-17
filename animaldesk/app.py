@@ -15,7 +15,7 @@ from . import APP_NAME, __version__, autostart, outfits, render
 from .breeds import BREEDS
 from .config import SIZES, Config, find_skin, list_skins
 from .pet import Stats
-from .skin import Skin
+from .skin import SkinSet
 
 ACTIONS = [            # disegno vettoriale (corpo intero)
     ("Siediti", "sit"),
@@ -41,7 +41,14 @@ PHOTO_ACTIONS = [      # pelle fotografica (affacciato dal bordo)
     ("Linguetta", "boop"),
     ("Dispetto", "tease"),
     ("Abbaia", "bark"),
+    ("Non ho voglia", "nope"),
+    ("Me ne vado", "leave"),
+    ("Fai la cacca", "poop"),
 ]
+
+VOICE = {"cane": "Abbaia", "gatto": "Miagola"}          # stessa azione, verso diverso
+FRAMINGS = {"intera": "Figura intera", "busto": "Primo piano"}
+TTL_CHOICES = ((60, "1 minuto"), (180, "3 minuti"), (300, "5 minuti"), (600, "10 minuti"), (0, "Mai"))
 
 
 def make_icon(size: int = 64) -> QIcon:
@@ -67,7 +74,9 @@ class AnimalDeskApp:
         index = min(self.config.screen_index, len(screens) - 1)
         self.overlay = PetOverlay(screens[index], self.config.size, self.config.speed,
                                   self.stats, self.config.follow_cursor,
-                                  skin=self.load_skin(self.config.skin), breed=self.config.breed)
+                                  skin=self.load_skin(self.config.skin), breed=self.config.breed,
+                                  props_ttl=self.config.props_ttl)
+        self.overlay.set_framing(self.config.framing)
         self.overlay.set_outfit(outfits.resolve(self.config.outfit))
         self.overlay.context_requested.connect(self.show_menu)
         self.overlay.show()
@@ -90,11 +99,17 @@ class AnimalDeskApp:
         header.setEnabled(False)
         menu.addSeparator()
 
-        for label, action in (PHOTO_ACTIONS if self.overlay.skin else ACTIONS):
+        skin = self.overlay.skin
+        for label, action in (PHOTO_ACTIONS if skin else ACTIONS):
+            if skin and action == "bark":
+                label = VOICE.get(skin.species, label)
             menu.addAction(label, lambda a=action: self.overlay.command(a))
         menu.addSeparator()
         menu.addAction("Lancia la palla", lambda: self.overlay.command("ball"))
+        menu.addAction("Dai un biscotto", lambda: self.overlay.command("treat"))
         menu.addAction("Dai da mangiare", lambda: self.overlay.command("feed"))
+        if self.overlay.items or self.overlay.ball or self.overlay.bowl:
+            menu.addAction("Pulisci tutto", lambda: self.overlay.command("clean"))
 
         follow = menu.addAction("Insegui il mouse")
         follow.setCheckable(True)
@@ -119,6 +134,16 @@ class AnimalDeskApp:
             act.triggered.connect(lambda _=False, k=key: self.set_breed(k))
         look.addSeparator()
         look.addAction("Nuovo animale da foto...", self.new_skin_from_photo)
+
+        if skin and len(skin.framings()) > 1:
+            frame = menu.addMenu("Inquadratura")
+            frame_group = QActionGroup(frame)
+            for key in skin.framings():
+                act = frame.addAction(FRAMINGS[key])
+                act.setCheckable(True)
+                act.setActionGroup(frame_group)
+                act.setChecked(self.config.framing == key)
+                act.triggered.connect(lambda _=False, k=key: self.set_framing(k))
 
         if self.overlay.skin:
             wear = menu.addMenu("Costume")
@@ -146,6 +171,15 @@ class AnimalDeskApp:
             act.setCheckable(True)
             act.setChecked(abs(self.config.speed - value) < 0.01)
             act.triggered.connect(lambda _=False, v=value: self.set_speed(v))
+
+        ttl_menu = menu.addMenu("Gli oggetti spariscono dopo")
+        ttl_group = QActionGroup(ttl_menu)
+        for seconds, label in TTL_CHOICES:
+            act = ttl_menu.addAction(label)
+            act.setCheckable(True)
+            act.setActionGroup(ttl_group)
+            act.setChecked(self.config.props_ttl == seconds)
+            act.triggered.connect(lambda _=False, v=seconds: self.set_props_ttl(v))
 
         screens = self.qt.screens()
         if len(screens) > 1:
@@ -178,12 +212,12 @@ class AnimalDeskApp:
 
     # ----------------------------------------------------------------- aspetto
     @staticmethod
-    def load_skin(name: str) -> Skin | None:
+    def load_skin(name: str) -> SkinSet | None:
         folder = find_skin(name)
         if folder is None:
             return None
         try:
-            return Skin.load(folder)
+            return SkinSet.load(folder)
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
@@ -194,7 +228,16 @@ class AnimalDeskApp:
             return
         self.config.skin = name
         self.overlay.set_skin(skin)
+        self.overlay.set_framing(self.config.framing)
         self.overlay.set_outfit(outfits.resolve(self.config.outfit))
+
+    def set_framing(self, key: str) -> None:
+        self.config.framing = key
+        self.overlay.set_framing(key)
+
+    def set_props_ttl(self, seconds: int) -> None:
+        self.config.props_ttl = seconds
+        self.overlay.props_ttl = float(seconds)
 
     def set_outfit(self, key: str) -> None:
         self.config.outfit = key
@@ -207,21 +250,22 @@ class AnimalDeskApp:
         self.overlay.set_breed(key)
 
     def new_skin_from_photo(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(None, "Scegli una foto del tuo animale", "",
-                                              "Immagini (*.jpg *.jpeg *.png *.webp)")
-        if not path:
+        paths, _ = QFileDialog.getOpenFileNames(
+            None, "Scegli le foto del tuo animale (anche piu' di una: muso, figura intera, di spalle)", "",
+            "Immagini (*.jpg *.jpeg *.png *.webp)")
+        if not paths:
             return
         try:
             from .ui_skin import SkinWizard
 
-            name = Path(path).stem.lower().replace(" ", "-")[:32] or "mio-cane"
-            wizard = SkinWizard(Path(path), name)
+            name = Path(paths[0]).stem.lower().replace(" ", "-")[:32] or "mio-animale"
+            wizard = SkinWizard([Path(p) for p in paths], name)
         except ImportError:            # opencv mancante
             QMessageBox.warning(None, APP_NAME, "Per creare una pelle da foto serve:\n"
                                                 "pip install \"animaldesk[foto]\"")
             return
         except ValueError as exc:      # foto non adatta o ritaglio fallito
-            QMessageBox.warning(None, APP_NAME, f"Questa foto non va bene:\n{exc}")
+            QMessageBox.warning(None, APP_NAME, f"Queste foto non vanno bene:\n{exc}")
             return
         if wizard.exec():
             self.set_skin(name)
@@ -255,10 +299,11 @@ class AnimalDeskApp:
         QMessageBox.information(
             None,
             f"{APP_NAME} {__version__}",
-            f"{APP_NAME}: un golden retriever che vive sul desktop.\n\n"
+            f"{APP_NAME}: il tuo animale che vive sul desktop.\n\n"
             "Trascinalo col mouse, doppio click per una carezza,\n"
-            "tasto destro per il menu, rotellina per la taglia.\n\n"
-            "Grafica vettoriale originale, nessun asset esterno.",
+            "tasto destro per il menu, rotellina per la taglia.\n"
+            "Click su un ricordino per raccoglierlo, sulla palla per un calcetto.\n\n"
+            "Da una o piu' foto del tuo cane o gatto nasce la sua pelle animata.",
         )
 
     # ---------------------------------------------------------------- lifecycle
@@ -300,13 +345,36 @@ def self_test() -> int:
         ov._timer.stop()
         if ov.skin is None:
             raise RuntimeError("pelle fotografica di default non trovata nel pacchetto")
-        lines.append(f"pelle: {ov.skin.name} {ov.skin.image.width()}x{ov.skin.image.height()}")
-        for _, action in PHOTO_ACTIONS:
-            ov.command(action)
-            for _ in range(15):
-                ov._tick()
-            if ov.grab().isNull():
-                raise RuntimeError(f"nessun frame per l'azione {action}")
+        lines.append(f"pelle: {ov.skin.name} viste: {', '.join(ov.skin.views)}")
+        missing = {"busto", "seduto", "serio", "dietro"} - set(ov.skin.views)
+        if missing:
+            raise RuntimeError(f"viste mancanti nel pacchetto: {sorted(missing)}")
+        for framing in ("intera", "busto"):
+            app.set_framing(framing)
+            for _, action in PHOTO_ACTIONS:
+                ov.command(action)
+                for _ in range(20):
+                    ov._tick()
+                if ov.grab().isNull():
+                    raise RuntimeError(f"nessun frame per l'azione {action} ({framing})")
+        app.set_framing("intera")
+        ov.pet.set_state("poop")
+        for _ in range(130):
+            ov._tick()
+        ov.command("treat")
+        ov.command("ball")
+        for _ in range(30):
+            ov._tick()
+        ov.grab()
+        if not any(i.kind == "poop" for i in ov.items):
+            raise RuntimeError("il ricordino non e' comparso")
+        ov.props_ttl = 0.5                       # gli oggetti a terra devono sparire da soli
+        ov.pet.set_state("sleep", 99.0)
+        for _ in range(400):
+            ov._tick()
+        if ov.items or ov.ball:
+            raise RuntimeError("gli oggetti a terra non spariscono")
+        lines.append("figura intera, primo piano, oggetti a tempo: ok")
         for outfit in ("santa", "summer", "ski", ""):
             ov.set_outfit(outfit)
             for _ in range(5):
@@ -332,7 +400,7 @@ def self_test() -> int:
         with tempfile.TemporaryDirectory() as tmp:
             cv2.imwrite(str(Path(tmp) / "foto.png"), img)
             rep = build_skin(Path(tmp) / "foto.png", "prova", Path(tmp) / "skins", use_ai=False)
-            Skin.load(rep["folder"])
+            SkinSet.load(rep["folder"])
         lines.append(f"da foto a pelle: ok ({rep['method']})")
         import anthropic
 

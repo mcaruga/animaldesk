@@ -93,7 +93,8 @@ def test_ogni_posa_disegna_senza_buchi(app, tmp_path, pose):
 
 
 def test_la_deformazione_resta_piccola(app, tmp_path):
-    """Il viso non deve mai stirarsi: nessun vertice si sposta piu' del 9% della taglia."""
+    """Il viso non deve mai stirarsi: nessun vertice si sposta piu' del 12.5% della testa
+    (per il primo piano di default, dove la testa e' il 76% dello sprite, e' il 9% della taglia)."""
     skin = Skin.load(_make_skin(tmp_path))
     size = 200
     for pose in (Pose(yaw=1.0, pitch=1.0), Pose(yaw=-1.0, pitch=-1.0, brow=1.0, mouth_open=1.0)):
@@ -101,7 +102,7 @@ def test_la_deformazione_resta_piccola(app, tmp_path):
         skin.render(pose, size)
         moved = max(((dx - sx - 10) ** 2 + (dy - sy - 10) ** 2) ** 0.5
                     for (sx, sy), (dx, dy) in zip(skin._src, skin._displace()))
-        assert moved < size * 0.09
+        assert moved < skin.hs * 0.125
 
 
 def test_la_palpebra_copre_l_occhio(app, tmp_path):

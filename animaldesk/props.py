@@ -1,4 +1,8 @@
-"""Oggetti del mondo: palla, ciotola, particelle. Niente Qt, solo fisica."""
+"""Oggetti del mondo: palla, ciotola, biscotti, cacca, particelle. Niente Qt, solo fisica.
+
+Tutto cio' che resta per terra ha un'eta': dopo qualche minuto sbiadisce e sparisce
+(`fade`), cosi' il desktop non si riempie.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,15 @@ import random
 from dataclasses import dataclass, field
 
 GRAVITY = 1500.0
+DEFAULT_TTL = 180.0       # secondi di vita degli oggetti lasciati a terra
+FADE_TIME = 4.0           # ultimi secondi: dissolvenza
+
+
+def fade(age: float, ttl: float) -> float:
+    """Opacita' di un oggetto a terra: 1 finche' e' fresco, poi sfuma fino a 0."""
+    if ttl <= 0:
+        return 1.0
+    return max(0.0, min(1.0, (ttl - age) / FADE_TIME))
 
 
 @dataclass
@@ -17,9 +30,12 @@ class Ball:
     vy: float = 0.0
     radius: float = 11.0
     resting: bool = False
+    age: float = 0.0          # secondi passati ferma a terra
+    delivered: bool = False   # gia' riportata: il cane non la rincorre da solo
 
     def update(self, dt: float, left: float, right: float, ground: float) -> None:
         if self.resting:
+            self.age += dt
             return
         self.vy += GRAVITY * dt
         self.x += self.vx * dt
@@ -45,6 +61,40 @@ class Bowl:
     x: float
     y: float
     width: float = 34.0
+    full: float = 1.0         # crocchette rimaste 0..1
+    age: float = 0.0
+
+
+@dataclass
+class Item:
+    """Oggetto semplice a terra: "treat" (biscotto) o "poop"."""
+
+    kind: str
+    x: float
+    y: float
+    vx: float = 0.0
+    vy: float = 0.0
+    size: float = 18.0
+    resting: bool = False
+    age: float = 0.0
+    spin: float = 0.0
+
+    def update(self, dt: float, left: float, right: float, ground: float) -> None:
+        self.age += dt
+        if self.resting:
+            return
+        self.vy += GRAVITY * dt
+        self.x = max(left + self.size, min(right - self.size, self.x + self.vx * dt))
+        self.y += self.vy * dt
+        self.spin += self.vx * dt * 2.0
+        if self.y >= ground:
+            self.y = ground
+            self.vy = -self.vy * 0.30
+            self.vx *= 0.55
+            if abs(self.vy) < 60.0:
+                self.vx = self.vy = 0.0
+                self.spin = 0.0                 # si adagia di piatto
+                self.resting = True
 
 
 @dataclass

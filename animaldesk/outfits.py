@@ -70,13 +70,15 @@ def draw_on_head(p: QPainter, outfit: str, skin) -> None:
     a, b, e, ang = _frame(skin)
     top = skin.uv(*skin.rig.head_top)
     p.save()
+    face = getattr(skin.rig, "face", True)          # di spalle: solo il cappello
     if outfit == "santa":
         _santa_hat(p, top, e, ang)
-    elif outfit == "summer":
+    elif outfit == "summer" and face:
         _sunglasses(p, a, b, e, ang)
     elif outfit == "ski":
         _beanie(p, top, e, ang)
-        _goggles(p, a, b, e, ang)
+        if face:
+            _goggles(p, a, b, e, ang)
     p.restore()
 
 

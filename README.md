@@ -1,9 +1,9 @@
-# AnimalDesk 🐕 — golden retriever da desktop
+# AnimalDesk 🐕🐈 — il tuo animale sul desktop
 
-Un cucciolo di golden retriever che vive **sopra** le tue finestre, piccolo, sempre
-visibile e sempre impegnato a fare qualcosa. Codice e grafica **100% originali**:
-il cane è disegnato a runtime con `QPainter` (vettoriale), quindi non ci sono
-sprite, GIF o asset di terze parti da trascinarsi dietro.
+Il tuo cane (o gatto) che vive **sopra** le tue finestre, piccolo, sempre visibile
+e sempre impegnato a fare qualcosa. Parte dalle sue **foto vere**: una figura
+intera seduta, la faccia seria, una foto di spalle, un primo piano. Codice
+originale, nessun asset di terze parti.
 
 ![pose](assets/icon-128.png)
 
@@ -15,17 +15,52 @@ sprite, GIF o asset di terze parti da trascinarsi dietro.
 | **Disegno: golden retriever** | vettoriale con gradienti, pelo e occhio con iride | `dogart.py` |
 | **Disegno: barboncino** | stesso scheletro, manto riccio, ciuffo e coda a pompon | `breeds.py` |
 
-Con la foto il cane sta **affacciato dal bordo basso dello schermo**: di una foto
-a mezzo busto esistono solo testa e petto, quindi il taglio resta nascosto sotto
-il bordo invece di fluttuare a mezz'aria.
+### Piu' foto, piu' viste
 
-### Azioni della pelle fotografica
+Una pelle e' fatta di **viste**, una per foto. Ogni azione chiede la vista che le
+serve e il passaggio dall'una all'altra e' una dissolvenza, mai uno scatto.
+
+| Vista | Foto | A cosa serve |
+|---|---|---|
+| `seduto` | figura intera di fronte, espressione allegra | la posa di tutti i giorni: guarda, inclina la testa, strizza gli occhi, abbaia |
+| `serio` | figura intera di fronte, faccia seria | **Non ho voglia**, **Fai la cacca** |
+| `dietro` | figura intera di spalle | **Me ne vado** e ogni spostamento |
+| `busto` | primo piano di testa e petto | scrive alla tastiera, nascondino, lecca la zampa, nanna, linguetta, dispetto |
+
+Menu **Inquadratura**: *Figura intera* (seduto sul bordo dello schermo) oppure
+*Primo piano* (affacciato dal bordo, come nella versione 1.1). Se una vista manca
+l'azione ripiega sulla piu' vicina: con una sola foto funziona comunque tutto.
+
+La figura intera **non cammina**: non esiste una foto di lui che cammina di lato,
+e far scivolare una foto ferma sembrerebbe finto. Quando deve spostarsi (palla,
+biscotto, puntatore) si gira, se ne va di spalle rimpicciolendo e ricompare nel
+punto nuovo.
+
+### Azioni
 
 Seduto, dormi, **scrivi alla tastiera**, **nascondino**, lecca la zampa, guardati
-intorno, **testa di lato**, grattata, occhi felici, linguetta, dispetto, abbaia.
-Lo sguardo segue il puntatore quando e' vicino. Gli spostamenti del viso sono
-limitati di proposito (un test verifica che nessun vertice si muova piu' del 9%
-della taglia): il muso non si deforma mai.
+intorno, **testa di lato**, grattata, occhi felici, linguetta, dispetto, abbaia, e:
+
+- **Non ho voglia** — la foto seria: palpebre a mezz'asta, si volta piano
+  dall'altra parte, sospira. Quando e' molto stanco a volte risponde cosi' anche
+  a un altro comando.
+- **Me ne vado** — ti guarda, si gira, se ne va di spalle. Dopo qualche secondo
+  torna, da un'altra parte.
+- **Fai la cacca** — ti fissa serissimo, si accuccia appena, lascia il ricordino,
+  due zampate di terra e (spesso) si allontana fischiettando.
+
+Lo sguardo segue il puntatore quando e' vicino, e la palla mentre rimbalza. Gli
+spostamenti del viso sono limitati di proposito e misurati in "teste", cosi'
+valgono uguali per un primo piano e per una figura intera (un test verifica che
+nessun vertice si muova piu' del 12,5% dell'altezza della testa e che zampe e
+petto restino fermi): il muso non si deforma mai.
+
+### Oggetti a terra
+
+Palla, biscotti, ciotola e ricordini **spariscono da soli dopo qualche minuto**
+(dissolvenza negli ultimi secondi). Menu **Gli oggetti spariscono dopo**: 1, 3
+(default), 5, 10 minuti o mai. Click su un ricordino per raccoglierlo, click
+sulla palla ferma per un calcetto, **Pulisci tutto** dal menu.
 
 ### Costumi
 
@@ -34,33 +69,45 @@ sci con gli sci. Seguono la testa quando gira o si inclina. Menu **Costume**:
 *Automatico* sceglie per data (1 dic - 6 gen Natale, 15 giu - 7 set mare), oppure
 si forza quello che si vuole.
 
-### Il tuo animale, in automatico
+### Il tuo animale, in automatico (cani e gatti)
 
-Menu **Aspetto -> Nuovo animale da foto...** oppure:
+Menu **Aspetto -> Nuovo animale da foto...** (si possono scegliere piu' foto
+insieme) oppure:
 
 ```bash
 pip install -e ".[foto]"
 export ANTHROPIC_API_KEY=...        # facoltativa, vedi sotto
-python -m animaldesk.tools.auto_skin foto.jpg --nome fido
+python -m animaldesk.tools.auto_skin seduto.jpg serio.jpg spalle.jpg muso.jpg --nome fido
 ```
 
-1. un modello di visione (Claude) guarda la foto e restituisce, come JSON
-   validato da schema, il riquadro testa+petto e i punti del viso;
+Per ogni foto:
+
+1. un modello di visione (Claude) la guarda e restituisce, come JSON validato da
+   schema: **specie** (cane, gatto), **inquadratura** (primo piano, figura intera
+   di fronte, di spalle), **espressione**, bocca aperta o chiusa, i riquadri di
+   testa+petto e dell'animale intero, i punti del viso;
 2. lo sfondo viene tolto (GrabCut guidato da quei punti + alpha matting);
 3. i punti vengono rifiniti sui pixel (centro reale di occhi e naso);
-4. si scrivono `sprite.png` e `rig.json`.
+4. la foto diventa la vista giusta (`busto`, `seduto`, `serio`, `dietro`).
 
-Tutte le azioni e i costumi sono guidati dal rig, quindi funzionano subito sul
-nuovo animale: non c'e' niente da ridisegnare. Se il modello giudica la foto
-inadatta (muso girato, occhio coperto, testa tagliata) lo dice invece di
-produrre una pelle sbagliata.
+Da una figura intera di fronte si ricava da solo anche il primo piano, quindi
+**una sola foto a figura intera basta** per avere tutte le azioni; le altre foto
+le rendono piu' belle. Tutto e' guidato dal rig: non c'e' niente da ridisegnare.
+Se il modello giudica una foto inadatta (muso girato, occhio coperto, testa
+tagliata) lo dice e si va avanti con le altre.
 
-Senza chiave API si usa una stima dai pixel (le tre macchie scure del muso):
-funziona su animali chiari con occhi e naso ben visibili, e in ogni caso la
-finestra mostra i punti e li lascia trascinare al posto giusto.
+Per un gatto cambia solo il verso (*Miagola*, "Miao!") e qualche fumetto: orecchie
+dritte o pendenti sono gestite dagli stessi punti base/punta.
 
-Foto che rendono meglio: muso di fronte o di tre quarti, occhi entrambi
-visibili, bocca chiusa, sfondo che stacca dal pelo.
+Senza chiave API si usa una stima dai pixel (le tre macchie scure del muso; la
+distanza tra gli occhi dice se e' un primo piano o una figura intera): funziona
+su animali chiari con occhi e naso ben visibili, non riconosce le foto di spalle,
+e in ogni caso la finestra mostra i punti di ogni vista e li lascia trascinare.
+
+Foto che rendono meglio: animale intero nell'inquadratura, zampe comprese, muso
+di fronte, occhi entrambi visibili, **sfondo che stacca dal pelo e niente
+guinzaglio** (il ritaglio automatico non li toglie: nella pelle di esempio
+guinzaglio e pupazzo sono stati tolti a mano).
 
 ## Cosa fa il cane
 
@@ -91,16 +138,17 @@ ritrovate al riavvio.
 
 | Gesto | Effetto |
 |---|---|
-| Trascinamento col tasto sinistro | lo prendi in braccio, al rilascio cade |
+| Trascinamento col tasto sinistro | lo sposti lungo il bordo (il disegno vettoriale si solleva e cade) |
+| Click su un ricordino / sulla palla ferma | lo raccogli / le dai un calcetto |
 | Doppio click | carezza (cuoricini) |
 | Tasto destro | menu completo |
 | Rotellina sopra il cane | cambia la taglia |
 | Icona nella tray | stesso menu + statistiche |
 
-Dal menu: comandi diretti (siediti, dormi, abbaia, scava, capriola, rincorri la
-coda, salta, grattati), **lancia la palla**, **dai da mangiare**, *insegui il
-mouse*, taglia (mini/piccolo/medio/grande), vivacità, scelta dello schermo su
-setup multi-monitor, **avvio automatico al login**, esci.
+Dal menu: le azioni, **lancia la palla**, **dai un biscotto**, **dai da
+mangiare**, *pulisci tutto*, *insegui il mouse*, aspetto, inquadratura, costume,
+taglia (mini/piccolo/medio/grande), vivacità, durata degli oggetti a terra,
+scelta dello schermo su setup multi-monitor, **avvio automatico al login**, esci.
 
 ## Avvio
 
@@ -127,14 +175,15 @@ la tray e il cane.
 
 ```
 animaldesk/
-├── skin.py      pelle fotografica: rig a mesh sulla foto vera
+├── skin.py      pelle fotografica: rig a mesh sulla foto vera, piu' viste (SkinSet)
 ├── dogart.py    disegno vettoriale realistico, parametrico per razza
 ├── breeds.py    razze (golden, barboncino)
 ├── render.py    palla, ciotola, particelle, fumetti, icona
 ├── outfits.py   costumi stagionali e oggetti di scena (tastiera, salvagente, sci)
 ├── tools/auto_skin.py  da foto a pelle in automatico (visione AI + ritaglio + rig)
+├── ui_skin.py   finestra "Nuovo animale da foto": punti correggibili per ogni vista
 ├── pet.py       macchina a stati + fisica + statistiche (nessuna dipendenza Qt)
-├── props.py     palla, ciotola, sistema di particelle (nessuna dipendenza Qt)
+├── props.py     palla, ciotola, biscotti, ricordini a tempo, particelle (nessuna dipendenza Qt)
 ├── overlay.py   finestra trasparente a tutto schermo, maschera click-through
 ├── app.py       tray, menu, impostazioni
 ├── config.py    configurazione JSON nella cartella utente
@@ -151,7 +200,7 @@ i click al desktop.
 display.
 
 ```bash
-python -m pytest -q      # 68 test
+python -m pytest -q      # 112 test
 ```
 
 ## Licenza

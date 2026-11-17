@@ -112,3 +112,120 @@ def test_rifiuto_del_modello_ricade_sui_pixel():
     pytest.importorskip("anthropic")
     client, _ = _client(SimpleNamespace(stop_reason="refusal", content=[]))
     assert auto_skin.analyze_photo(np.zeros((100, 100, 3), np.uint8), client) is None
+
+
+# ------------------------------------------------------- piu' foto, piu' viste
+def _full_photo(tmp_path, name, serious=False, back=False):
+    """Animale intero sintetico: corpo, testa in alto, due occhi e un naso (non di spalle)."""
+    img = np.full((900, 600, 3), (150, 120, 95), np.uint8)
+    cv2.ellipse(img, (300, 560), (150, 260), 0, 0, 360, (150, 200, 235), -1)       # corpo
+    cv2.ellipse(img, (300, 250), (120, 130), 0, 0, 360, (160, 210, 240), -1)       # testa
+    rng = np.random.default_rng(3)
+    img = np.clip(img.astype(np.int16) + rng.integers(-6, 7, img.shape), 0, 255).astype(np.uint8)
+    if not back:
+        for cx in (255, 345):
+            cv2.ellipse(img, (cx, 235), (16, 11), 0, 0, 360, (12, 12, 14), -1)
+        cv2.ellipse(img, (300, 290), (26, 20), 0, 0, 360, (16, 14, 18), -1)
+    path = tmp_path / name
+    cv2.imwrite(str(path), img)
+    W, H = 600, 900
+    pt = lambda x, y: {"x": x / W, "y": y / H}          # noqa: E731
+    info = {
+        "usable": True, "problem": "", "species": "cat",
+        "framing": "full_back" if back else "full_front",
+        "mood": "serious" if serious else "happy", "mouth_open": not serious and not back,
+        "bust": {"x0": 150 / W, "y0": 100 / H, "x1": 450 / W, "y1": 470 / H},
+        "body": {"x0": 120 / W, "y0": 100 / H, "x1": 480 / W, "y1": 840 / H},
+        "eye_left": pt(258, 238), "eye_right": pt(342, 232), "nose": pt(302, 292), "mouth": pt(300, 322),
+        "head_top": pt(300, 122), "neck": pt(300, 378),
+        "ear_left": {"base": pt(215, 170), "tip": pt(200, 110)},
+        "ear_right": {"base": pt(385, 170), "tip": pt(400, 110)},
+    }
+    return path, info
+
+
+def test_tre_foto_diventano_quattro_viste(tmp_path):
+    from animaldesk.skin import SkinSet
+
+    pytest.importorskip("PySide6.QtGui")
+    photos, infos = zip(_full_photo(tmp_path, "felice.png"),
+                        _full_photo(tmp_path, "serio.png", serious=True),
+                        _full_photo(tmp_path, "spalle.png", back=True))
+    rep = auto_skin.build_skin(list(photos), "micio", tmp_path / "skins", analysis=list(infos))
+    assert rep["method"] == "ai" and rep["species"] == "gatto" and rep["home"] == "seduto"
+    assert rep["views"] == {"seduto": "felice.png", "busto": "felice.png (ritaglio)",
+                            "serio": "serio.png", "dietro": "spalle.png"}
+    assert rep["missing"] == [] and not rep["warnings"]
+    folder = tmp_path / "skins" / "micio"
+    rig = json.loads((folder / "rig.json").read_text())
+    assert rig["species"] == "gatto" and rig["sprite"] == "sprite.png" and len(rig["eyes"]) == 2
+    assert set(rig["views"]) == {"seduto", "serio", "dietro"}
+    seduto = rig["views"]["seduto"]
+    assert seduto["full"] and seduto["open_mouth"] and seduto["feet"] == 1.0
+    assert abs(seduto["neck"][0] - 0.5) < 0.02, "lo sprite e' centrato sul collo"
+    assert rig["views"]["dietro"]["face"] is False
+    assert "open_mouth" not in rig["views"]["serio"]
+    for name in ("sprite.png", "seduto.png", "serio.png", "dietro.png"):
+        sprite = cv2.imread(str(folder / name), cv2.IMREAD_UNCHANGED)
+        assert sprite.shape[0] == 1000 and sprite[2, 2, 3] == 0, name
+    eye = seduto["eyes"][0]
+    sprite = cv2.imread(str(folder / "seduto.png"), cv2.IMREAD_UNCHANGED)
+    assert int(sprite[int(eye["y"] * 1000), int(eye["x"] * sprite.shape[1]), :3].max()) < 70
+
+    skin = SkinSet.load(folder)                       # e il programma la carica cosi' com'e'
+    assert set(skin.views) == {"busto", "seduto", "serio", "dietro"}
+    assert skin.species == "gatto" and skin.full
+
+
+def test_il_primo_piano_vero_sostituisce_quello_ricavato(tmp_path):
+    full, info_full = _full_photo(tmp_path, "intero.png")
+    rep = auto_skin.build_skin([full, _photo(tmp_path)], "due", tmp_path / "skins",
+                               analysis=[info_full, dict(ANALYSIS, framing="closeup", body=ANALYSIS["bust"])])
+    assert rep["views"]["busto"] == "foto.png" and rep["views"]["seduto"] == "intero.png"
+    assert rep["missing"] == ["serio", "dietro"]
+
+
+def test_foto_doppia_e_foto_non_adatta_non_bloccano_le_altre(tmp_path):
+    a, ia = _full_photo(tmp_path, "a.png")
+    b, ib = _full_photo(tmp_path, "b.png")
+    c, ic = _full_photo(tmp_path, "c.png")
+    d, id_ = _full_photo(tmp_path, "d.png")
+    id_ = dict(id_, usable=False, problem="il muso e' coperto")
+    rep = auto_skin.build_skin([a, b, c, d], "tanti", tmp_path / "skins", analysis=[ia, ib, ic, id_])
+    assert set(rep["views"]) == {"seduto", "serio", "busto"}        # la seconda felice fa da "serio"
+    assert len(rep["warnings"]) == 2
+    with pytest.raises(ValueError, match="coperto"):
+        auto_skin.build_skin([d], "niente", tmp_path / "skins", analysis=[id_])
+
+
+def test_correzione_a_mano_di_una_vista(tmp_path):
+    full, info = _full_photo(tmp_path, "intero.png")
+    rep = auto_skin.build_skin(full, "ritocco", tmp_path / "skins", analysis=info)
+    folder = tmp_path / "skins" / "ritocco"
+    old = rep["rigs"]["seduto"]
+    pts = {"eye_left": [old["eyes"][0]["x"], old["eyes"][0]["y"]],
+           "eye_right": [old["eyes"][1]["x"], old["eyes"][1]["y"]],
+           "nose": list(old["nose"]), "mouth": list(old["mouth"]),
+           "head_top": list(old["head_top"]), "neck": [old["neck"][0], old["neck"][1] + 0.03]}
+    auto_skin.update_view(folder, "seduto", pts, species="gatto")
+    rig = json.loads((folder / "rig.json").read_text())
+    assert rig["species"] == "gatto"
+    assert rig["views"]["seduto"]["neck"][1] == pytest.approx(old["neck"][1] + 0.03, abs=1e-3)
+    assert rig["views"]["seduto"]["full"] and rig["views"]["seduto"]["open_mouth"]
+    assert len(rig["eyes"]) == 2, "il primo piano non viene toccato"
+
+
+def test_senza_ai_la_figura_intera_si_riconosce_dalle_proporzioni(tmp_path):
+    full, _ = _full_photo(tmp_path, "intero.png")
+    rep = auto_skin.build_skin(full, "px", tmp_path / "skins", use_ai=False)
+    assert rep["method"] == "pixel" and list(rep["views"]) == ["seduto"]
+    rep = auto_skin.build_skin(_photo(tmp_path), "px2", tmp_path / "skins", use_ai=False)
+    assert list(rep["views"]) == ["busto"]
+
+
+def test_lo_schema_chiede_specie_inquadratura_ed_espressione():
+    props = auto_skin.SCHEMA["properties"]
+    assert props["species"]["enum"] == ["dog", "cat", "other"]
+    assert props["framing"]["enum"] == ["closeup", "full_front", "full_back"]
+    assert set(auto_skin.SCHEMA["required"]) == set(props)
+    assert "cat" in auto_skin.PROMPT and "full_back" in auto_skin.PROMPT

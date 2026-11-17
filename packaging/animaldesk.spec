@@ -36,5 +36,5 @@ if sys.platform == "darwin":
         name="AnimalDesk.app",
         icon=icon,
         bundle_identifier="com.animaldesk.app",
-        info_plist={"LSUIElement": True, "CFBundleShortVersionString": "1.1.0"},
+        info_plist={"LSUIElement": True, "CFBundleShortVersionString": "1.2.0"},
     )

@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPath, QPen
 
 from .breeds import GOLDEN, Breed
 from .dogart import draw_dog  # noqa: F401  (riesportato: render.draw_dog)
@@ -62,6 +62,75 @@ def draw_bowl(painter: QPainter, x: float, y: float, w: float, full: float = 1.0
     if full > 0.05:  # crocchette sopra il bordo
         painter.setBrush(KIBBLE)
         painter.drawEllipse(QRectF(x - w * 0.34, y - h - w * 0.13 * full, w * 0.68, w * 0.28 * full + w * 0.08))
+    painter.restore()
+
+
+def draw_treat(painter: QPainter, x: float, y: float, size: float, spin: float = 0.0) -> None:
+    """Biscotto a forma di osso, appoggiato a terra in (x, y)."""
+    w, h = size * 1.5, size * 0.52
+    painter.save()
+    painter.translate(x, y - h * 0.62)
+    painter.rotate(spin)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(0, 0, 0, 40))
+    painter.drawEllipse(QRectF(-w * 0.5, h * 0.42, w, h * 0.34))
+    bone = QPainterPath()
+    bone.addRoundedRect(QRectF(-w * 0.36, -h * 0.26, w * 0.72, h * 0.52), h * 0.2, h * 0.2)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            bone.addEllipse(QPointF(sx * w * 0.38, sy * h * 0.24), h * 0.36, h * 0.36)
+    bone = bone.simplified()
+    grad = QLinearGradient(0, -h * 0.6, 0, h * 0.6)
+    grad.setColorAt(0.0, QColor("#E9C58C"))
+    grad.setColorAt(1.0, QColor("#B98646"))
+    painter.setPen(QPen(QColor("#8C6230"), max(1.0, size * 0.05)))
+    painter.setBrush(QBrush(grad))
+    painter.drawPath(bone)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(120, 82, 40, 150))
+    for k in (-1, 0, 1):
+        painter.drawEllipse(QPointF(k * w * 0.16, 0), size * 0.035, size * 0.035)
+    painter.restore()
+
+
+def draw_poop(painter: QPainter, x: float, y: float, size: float, fresh: float = 0.0, t: float = 0.0) -> None:
+    """Il ricordino: tre giri impilati. `fresh` 0..1 disegna le ondine di odore."""
+    painter.save()
+    painter.translate(x, y)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(0, 0, 0, 55))
+    painter.drawEllipse(QRectF(-size * 0.62, -size * 0.10, size * 1.24, size * 0.22))
+    dark, base, light = QColor("#4A3018"), QColor("#6B4423"), QColor("#8A5C30")
+    for cx, cy, rw, rh in ((0.0, -0.17, 0.56, 0.20), (0.02, -0.42, 0.40, 0.17), (0.0, -0.63, 0.25, 0.13)):
+        rect = QRectF((cx - rw) * size, (cy - rh) * size, rw * 2 * size, rh * 2 * size)
+        grad = QLinearGradient(rect.left(), rect.top(), rect.right(), rect.bottom())
+        grad.setColorAt(0.0, light)
+        grad.setColorAt(0.55, base)
+        grad.setColorAt(1.0, dark)
+        painter.setPen(QPen(dark, max(1.0, size * 0.035)))
+        painter.setBrush(QBrush(grad))
+        painter.drawEllipse(rect)
+    tip = QPainterPath(QPointF(-size * 0.13, -size * 0.70))
+    tip.quadTo(QPointF(-size * 0.02, -size * 0.98), QPointF(size * 0.12, -size * 0.92))
+    tip.quadTo(QPointF(size * 0.06, -size * 0.80), QPointF(size * 0.15, -size * 0.70))
+    tip.closeSubpath()
+    painter.setBrush(base)
+    painter.drawPath(tip)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(255, 255, 255, 60))
+    painter.drawEllipse(QRectF(-size * 0.34, -size * 0.30, size * 0.22, size * 0.08))
+    if fresh > 0.02:                                  # ondine di odore
+        pen = QPen(QColor(120, 150, 70, int(170 * fresh)), max(1.2, size * 0.06))
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        for k, dx in enumerate((-0.42, 0.0, 0.42)):
+            ph = t * 3.0 + k * 1.7
+            wave = QPainterPath(QPointF(dx * size, -size * 1.05))
+            wave.cubicTo(QPointF((dx + 0.16 * math.sin(ph)) * size, -size * 1.22),
+                         QPointF((dx - 0.16 * math.sin(ph)) * size, -size * 1.40),
+                         QPointF((dx + 0.05 * math.sin(ph)) * size, -size * 1.58))
+            painter.drawPath(wave)
     painter.restore()
 
 

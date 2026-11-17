@@ -149,3 +149,171 @@ def test_pose_delle_azioni_nuove(world):
     for _ in range(40):
         pose = pet.update(1 / 30, world)
     assert 0.2 < pose.tongue < 0.5              # solo la punta
+
+
+# ------------------------------------------------------------ figura intera
+def _full(**kw):
+    return Pet(bust=True, full=True, views=("busto", "seduto", "serio", "dietro"), **kw)
+
+
+def _run(pet, world, seconds, collect=None):
+    for _ in range(int(seconds * 30)):
+        pet.update(1 / 30, world)
+        if collect is not None:
+            collect.extend(pet.effects)
+        pet.effects.clear()
+
+
+def test_la_figura_intera_non_scivola(world):
+    random.seed(3)
+    pet = _full()
+    pet.x, pet.y = 500.0, world.ground
+    for state in ("walk", "run", "idle", "sit", "look", "bark"):
+        pet.set_state(state, 2.0)
+        x0 = pet.x
+        _run(pet, world, 1.5)
+        assert pet.x == x0, state
+    for _ in range(400):                       # e da sola non sceglie mai di camminare
+        assert pet.choose_behavior(world) not in ("walk", "run", "chase", "jump", "roll", "spin", "dig")
+
+
+def test_spostarsi_vuol_dire_andare_via_di_spalle_e_tornare(world):
+    pet = _full()
+    pet.x, pet.y = 200.0, world.ground
+    pet.set_state("chase", 4.0)
+    world.cursor_x = 800.0
+    seen = set()
+    for _ in range(120):
+        pet.update(1 / 30, world)
+        if pet.pose.away > 0.3:
+            seen.add(pet.pose.view)
+        if pet._trav is None and pet.x != 200.0:
+            break
+    assert "dietro" in seen
+    assert abs(pet.x - 800.0) < 1.0 and pet.pose.away < 0.05
+
+
+def test_me_ne_vado_e_poi_torna_altrove(world):
+    random.seed(11)
+    pet = _full()
+    pet.x, pet.y = 500.0, world.ground
+    pet.set_state("leave")
+    said, max_away, views = [], 0.0, set()
+    while pet.state == "leave":
+        pet.update(1 / 30, world)
+        said += [e.text for e in pet.effects if e.kind == "bubble"]
+        pet.effects.clear()
+        max_away = max(max_away, pet.pose.away)
+        views.add(pet.pose.view)
+    assert max_away > 0.99 and "dietro" in views
+    assert abs(pet.x - 500.0) > 100, "torna in un punto diverso"
+    assert pet.state == "idle" and len(said) == 2      # saluta quando va e quando torna
+
+
+def test_me_ne_vado_senza_foto_di_spalle_scende_sotto_il_bordo(world):
+    pet = Pet(bust=True)                                # pelle a una sola foto (primo piano)
+    pet.y = world.ground
+    pet.set_state("leave")
+    _run(pet, world, 3.5)
+    assert pet.pose.sink > 1.0 and pet.pose.away == 0.0
+
+
+def test_non_ho_voglia_usa_la_faccia_seria(world):
+    pet = _full()
+    pet.set_state("nope")
+    _run(pet, world, 3.0)
+    p = pet.pose
+    assert p.view == "serio" and abs(p.yaw) > 0.3 and p.eye_open < 0.75
+    _run(pet, world, 6.0)
+    assert pet.state != "nope"
+
+
+def test_fai_la_cacca_ne_lascia_una_sola(world):
+    random.seed(2)
+    pet = _full()
+    pet.x, pet.y = 500.0, world.ground
+    pet.set_state("poop")
+    fx = []
+    _run(pet, world, 2.0, fx)
+    assert pet.pose.view == "serio" and pet.pose.squash < 1.0     # accucciato, serissimo
+    _run(pet, world, 5.5, fx)
+    poops = [e for e in fx if e.kind == "poop"]
+    assert len(poops) == 1 and abs(poops[0].x - 500.0) > 30
+    assert any(e.kind == "dirt" for e in fx)
+    assert pet.state in ("idle", "leave")
+
+
+def test_azioni_da_primo_piano_chiedono_il_busto(world):
+    pet = _full()
+    for state in ("typing", "lick", "hide", "sleep", "boop", "tease"):
+        pet.set_state(state, 3.0)
+        pet.update(1 / 30, world)
+        assert pet.pose.view == "busto", state
+    pet.set_state("tilt", 3.0)
+    pet.update(1 / 30, world)
+    assert pet.pose.view == "" and pet.pose.sink == 0.0
+
+
+def test_figura_intera_senza_primo_piano(world):
+    pet = Pet(bust=True, full=True, views=("seduto",))
+    pet.set_state("hide")
+    _run(pet, world, 2.0)
+    assert pet.pose.sink == 0.0 and pet.pose.away > 0.9      # non scende: si allontana
+    for _ in range(300):
+        assert pet.choose_behavior(world) not in ("typing", "lick")
+
+
+def test_biscotto_lo_raggiunge_e_lo_mangia(world):
+    for pet in (_full(), Pet(bust=True)):
+        pet.x, pet.y = 300.0, world.ground
+        pet.stats.fame = 50.0
+        world.treat = type("T", (), {"x": 700.0})()
+        assert pet.choose_behavior(world) == "treat"
+        pet.set_state("treat")
+        fx = []
+        _run(pet, world, 12.0, fx)
+        assert any(e.kind == "eat_treat" for e in fx)
+        assert abs(pet.x - 700.0) < 120 and pet.stats.fame < 50.0
+    world.treat = None
+
+
+def test_palla_in_volo_poi_presa_e_riportata(world):
+    for pet in (_full(), Pet(bust=True)):
+        pet.x, pet.y = 200.0, world.ground
+        ball = type("B", (), {"x": 600.0, "resting": False, "delivered": False})()
+        world.ball, world.cursor_x = ball, 250.0
+        pet.set_state("fetch", 25.0)
+        _run(pet, world, 1.0)
+        assert pet.x == 200.0 and not pet.carrying_ball        # finche' rimbalza la guarda
+        ball.resting = True
+        carried = False
+        for _ in range(600):
+            pet.update(1 / 30, world)
+            carried = carried or pet.carrying_ball
+            if any(e.kind == "drop_ball" for e in pet.effects):
+                ball.delivered = True                  # come fa la finestra quando la posa a terra
+                break
+            pet.effects.clear()
+        assert carried and ball.delivered and not pet.carrying_ball
+        assert all(pet.choose_behavior(world) != "fetch" for _ in range(200))
+    world.ball = None
+
+
+def test_senza_ciotola_chiede_ma_non_mangia(world):
+    pet = _full()
+    pet.stats.fame = 95.0
+    world.has_bowl = False
+    assert pet.choose_behavior(world) == "idle"
+    pet.stats.fame = 20.0
+    assert all(pet.choose_behavior(world) != "eat" for _ in range(300))
+    world.has_bowl = True
+
+
+def test_il_gatto_miagola(world):
+    cat = Pet(bust=True, species="gatto")
+    cat.set_state("bark")
+    text = [e.text for e in cat.effects if e.kind == "bubble"][0]
+    assert text[0] == "M"
+    cat.effects.clear()
+    cat.say("leave")                                   # il resto e' in comune
+    assert cat.effects[0].text

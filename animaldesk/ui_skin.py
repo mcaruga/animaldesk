@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
-from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QLabel,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox,
+                               QHBoxLayout, QLabel, QTabWidget, QVBoxLayout, QWidget)
 
 from .config import config_dir
 
 LABELS = {"eye_left": "occhio", "eye_right": "occhio", "nose": "naso", "mouth": "bocca",
           "head_top": "testa", "neck": "collo"}
+VIEW_NAMES = {"busto": "Primo piano", "seduto": "Figura intera", "serio": "Serio", "dietro": "Di spalle"}
+USED_FOR = {"busto": "tastiera, nascondino, leccata, nanna", "seduto": "la posa di tutti i giorni",
+            "serio": "\"non ho voglia\"", "dietro": "\"me ne vado\""}
+SPECIES = (("cane", "Cane"), ("gatto", "Gatto"))
 
 
 class _Canvas(QWidget):
@@ -61,9 +64,10 @@ class _Canvas(QWidget):
 
 
 class SkinWizard(QDialog):
-    """Foto → pelle animata. L'AI (se c'e' una chiave) trova i punti; qui si possono ritoccare."""
+    """Foto → pelle animata. L'AI (se c'e' una chiave) riconosce specie, inquadratura
+    e punti del viso di ogni foto; qui si controllano e si ritoccano."""
 
-    def __init__(self, photo: Path, name: str, parent=None) -> None:
+    def __init__(self, photos: Path | list[Path], name: str, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Nuovo animale da foto")
         self.name = name
@@ -71,41 +75,61 @@ class SkinWizard(QDialog):
 
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            self.report = build_skin(photo, name, config_dir() / "skins")
+            self.report = build_skin(photos, name, config_dir() / "skins")
         finally:
             QApplication.restoreOverrideCursor()
         self.folder = Path(self.report["folder"])
-        rig = self.report["rig"]
-        points = {
-            "eye_left": [rig["eyes"][0]["x"], rig["eyes"][0]["y"]],
-            "eye_right": [rig["eyes"][1]["x"], rig["eyes"][1]["y"]],
-            "nose": list(rig["nose"]), "mouth": list(rig["mouth"]),
-            "head_top": list(rig["head_top"]), "neck": list(rig["neck"]),
-        }
-        how = {"ai": "L'AI ha trovato i punti del viso.",
+        rep = self.report
+        how = {"ai": "L'AI ha riconosciuto le foto e trovato i punti del viso.",
                "pixel": "Punti stimati dai pixel (senza AI).",
-               "manuale": "Non ho trovato occhi e naso: trascina i punti al posto giusto."}[self.report["method"]]
+               "manuale": "Non ho trovato occhi e naso: trascina i punti al posto giusto."}[rep["method"]]
+        lines = [how, "Controlla ogni vista e, se serve, trascina: occhi, naso, bocca, testa, collo."]
+        if rep["missing"]:
+            lines.append("Foto che puoi ancora aggiungere: " + "; ".join(
+                f"{VIEW_NAMES[k].lower()} ({USED_FOR[k]})" for k in rep["missing"]))
+        lines += [f"Attenzione: {w}" for w in rep["warnings"]]
+
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(how + "\nControlla e, se serve, trascinali: occhi, naso, bocca, testa, collo."))
-        self.canvas = _Canvas(QImage(str(self.folder / "sprite.png")), points, self)
-        layout.addWidget(self.canvas)
+        note = QLabel("\n".join(lines))
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Che animale e'?"))
+        self.species = QComboBox(self)
+        for key, label in SPECIES:
+            self.species.addItem(label, key)
+        self.species.setCurrentIndex(max(0, self.species.findData(rep["species"])))
+        row.addWidget(self.species)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        self.canvases: dict[str, _Canvas] = {}
+        tabs = QTabWidget(self)
+        for kind, rig in rep["rigs"].items():
+            if rig.get("face") is False:
+                continue                                   # di spalle: nessun punto da sistemare
+            points = {
+                "eye_left": [rig["eyes"][0]["x"], rig["eyes"][0]["y"]],
+                "eye_right": [rig["eyes"][1]["x"], rig["eyes"][1]["y"]],
+                "nose": list(rig["nose"]), "mouth": list(rig["mouth"]),
+                "head_top": list(rig["head_top"]), "neck": list(rig["neck"]),
+            }
+            canvas = _Canvas(QImage(str(self.folder / rig["sprite"])), points, self)
+            self.canvases[kind] = canvas
+            tabs.addTab(canvas, VIEW_NAMES.get(kind, kind))
+        layout.addWidget(tabs)
+        # per compatibilita': il primo foglio e' "il" canvas
+        self.canvas = next(iter(self.canvases.values()), None)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
     def accept(self) -> None:
-        import cv2
+        from .tools.auto_skin import update_view
 
-        from .tools.auto_skin import make_rig
-
-        pts = self.canvas.points
-        old = self.report["rig"]
-        marks = {k: {"x": v[0], "y": v[1]} for k, v in pts.items()}
-        for key, ear in (("ear_left", old["ear_l"]), ("ear_right", old["ear_r"])):
-            marks[key] = {"base": {"x": ear[2], "y": ear[3]},
-                          "tip": {"x": (ear[0] - 0.35 * ear[2]) / 0.65, "y": (ear[1] - 0.35 * ear[3]) / 0.65}}
-        sprite = cv2.imread(str(self.folder / "sprite.png"), cv2.IMREAD_UNCHANGED)
-        rig = make_rig(sprite, marks, self.name, has_paw=(self.folder / "paw.png").exists())
-        (self.folder / "rig.json").write_text(json.dumps(rig, indent=2), encoding="utf-8")
+        species = self.species.currentData()
+        for kind, canvas in self.canvases.items():
+            update_view(self.folder, kind, canvas.points, species)
         super().accept()

@@ -20,10 +20,13 @@ from PySide6.QtGui import (QBrush, QColor, QImage, QLinearGradient, QPainter,
 
 from .render_types import Pose
 
-PAD_TOP = 0.36      # spazio sopra la testa (cappelli), frazione dell'altezza
+PAD_HEAD = 0.474    # spazio sopra la testa (cappelli), in "teste" (distanza cima-collo)
 PAD_SIDE = 0.14     # spazio ai lati, frazione della larghezza
-NX, NY = 14, 18     # celle della griglia
 MARGIN = 10         # px attorno al buffer per gli spostamenti
+AWAY_SHRINK = 0.45  # quanto rimpicciolisce quando si allontana del tutto
+
+# Tutte le misure del rig sono in "teste": cosi' lo stesso codice anima un primo
+# piano (la testa riempie lo sprite) e una figura intera (la testa e' un quarto).
 
 
 def _smooth(a: float, b: float, x: float) -> float:
@@ -58,6 +61,29 @@ class Rig:
     ear_r: tuple[float, float, float, float] = (0.93, 0.34, 0.84, 0.17)
     feet: float = 1.03                # quanto lo sprite scende sotto il bordo (nasconde il taglio)
     tongue: str = "#D8748A"
+    face: bool = True                 # False = vista di spalle: nessun viso da animare
+    full: bool = False                # figura intera appoggiata sul bordo (non un busto affacciato)
+    height: float = 1.0               # altezza di disegno rispetto alla taglia scelta
+    open_mouth: bool = False          # nella foto la bocca e' gia' aperta (lingua vera in vista)
+
+    @property
+    def head(self) -> float:
+        """Altezza della testa (cima-collo) come frazione dell'altezza dello sprite."""
+        return max(0.06, self.neck[1] - self.head_top[1])
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Rig":
+        rig = cls(eyes=[Eye(**e) for e in data.get("eyes", [])])
+        for key in ("nose", "mouth", "head_top", "neck", "ear_l", "ear_r"):
+            if key in data:
+                setattr(rig, key, tuple(data[key]))
+        rig.feet = float(data.get("feet", rig.feet))
+        rig.tongue = data.get("tongue", rig.tongue)
+        rig.face = bool(data.get("face", True)) and len(rig.eyes) >= 2
+        rig.full = bool(data.get("full", False))
+        rig.height = float(data.get("height", 1.0))
+        rig.open_mouth = bool(data.get("open_mouth", False))
+        return rig
 
 
 class Skin:
@@ -88,21 +114,9 @@ class Skin:
 
     @classmethod
     def load(cls, folder: str | Path) -> "Skin":
-        folder = Path(folder)
-        data = json.loads((folder / "rig.json").read_text(encoding="utf-8"))
-        img = QImage(str(folder / data.get("sprite", "sprite.png")))
-        if img.isNull():
-            raise FileNotFoundError(f"sprite non caricato: {folder}")
-        rig = Rig(eyes=[Eye(**e) for e in data.get("eyes", [])])
-        for key in ("nose", "mouth", "head_top", "neck", "ear_l", "ear_r"):
-            if key in data:
-                setattr(rig, key, tuple(data[key]))
-        rig.feet = float(data.get("feet", rig.feet))
-        rig.tongue = data.get("tongue", rig.tongue)
-        paw = None
-        if data.get("paw") and (folder / data["paw"]).exists():
-            paw = QImage(str(folder / data["paw"]))
-        return cls(data.get("name", folder.name), img, rig, paw)
+        """Una sola vista della cartella (il primo piano se c'e'). Tutte: SkinSet.load()."""
+        views = SkinSet.load(folder).views
+        return views.get("busto") or next(iter(views.values()))
 
     def set_outfit(self, outfit: str) -> None:
         if outfit != self.outfit:
@@ -119,7 +133,11 @@ class Skin:
         s = size / img.height()
         self.s = s
         self.sw, self.sh = img.width() * s, img.height() * s
-        self.px, self.py = self.sw * PAD_SIDE, self.sh * PAD_TOP
+        r = self.rig
+        H = r.head
+        hs = self.hs = H * self.sh                 # la "testa" in pixel
+        wd = hs / self.sw                          # una testa, in unita' u
+        self.px, self.py = self.sw * PAD_SIDE, hs * PAD_HEAD
         tw, th = int(self.sw + 2 * self.px) + 1, int(self.sh + self.py) + 1
         self.tw, self.th = tw, th
 
@@ -142,37 +160,58 @@ class Skin:
             p.end()
         self._static = static
 
+        # griglia: fitta sulla testa (dove si deforma), larga sul corpo
+        step = hs / 10.0
+        fine_y = self.py + (r.neck[1] + 0.35 * H) * self.sh
+        ys = [0.0]
+        while ys[-1] < th - 0.5:
+            ys.append(min(float(th), ys[-1] + (step if ys[-1] < fine_y else step * 3.0)))
+        if len(ys) > 2 and ys[-1] - ys[-2] < step * 0.35:
+            ys.pop(-2)
+        cx = self.px + r.neck[0] * self.sw
+        xs = [0.0]
+        while xs[-1] < tw - 0.5:
+            near = abs(xs[-1] + step * 0.55 - cx) < hs * 1.25
+            xs.append(min(float(tw), xs[-1] + step * (1.1 if near else 2.6)))
+        if len(xs) > 2 and xs[-1] - xs[-2] < step * 0.35:
+            xs.pop(-2)
+        self._xs, self._ys = xs, ys
+
         # pesi per vertice
-        r = self.rig
+        top = r.head_top[1]
+        hx, hy = (r.head_top[0] + r.neck[0]) / 2, top + 0.5 * H
+        radius = 0.80 * hs
         self._weights = []
         self._src = []
-        for j in range(NY + 1):
-            for i in range(NX + 1):
-                x, y = i / NX * tw, j / NY * th
+        for y in ys:
+            for x in xs:
                 u, v = (x - self.px) / self.sw, (y - self.py) / self.sh
-                wh = 1.0 - _smooth(0.66, 0.92, v)
-                depth = (0.80 * _gauss(u, v, r.nose[0], r.nose[1], 0.24, 0.22)
-                         + 0.30 * _gauss(u, v, 0.55, 0.34, 0.50, 0.46))
-                we_l = _gauss(u, v, r.ear_l[0], r.ear_l[1], 0.10, 0.22)
-                we_r = _gauss(u, v, r.ear_r[0], r.ear_r[1], 0.09, 0.18)
-                wb = 0.0
-                for eye in r.eyes:
-                    wb = max(wb, _gauss(u, v, eye.x, eye.y - 0.065, 0.11, 0.05))
-                wj = _gauss(u, v, r.mouth[0], r.mouth[1] + 0.055, 0.17, 0.065)
-                wc = _smooth(0.72, 1.0, v)
+                wh = wb = wj = we_l = we_r = depth = 0.0
+                if r.face:
+                    dist = math.hypot((u - hx) * self.sw, (v - hy) * self.sh)
+                    wh = (1.0 - _smooth(top + 0.842 * H, top + 1.184 * H, v)) \
+                        * (1.0 - _smooth(radius, radius * 1.6, dist))
+                    depth = (0.80 * _gauss(u, v, r.nose[0], r.nose[1], 0.288 * wd, 0.29 * H)
+                             + 0.30 * _gauss(u, v, hx + 0.036 * wd, top + 0.42 * H, 0.60 * wd, 0.605 * H))
+                    we_l = _gauss(u, v, r.ear_l[0], r.ear_l[1], 0.114 * wd, 0.26 * H)
+                    we_r = _gauss(u, v, r.ear_r[0], r.ear_r[1], 0.114 * wd, 0.26 * H)
+                    for eye in r.eyes:
+                        wb = max(wb, _gauss(u, v, eye.x, eye.y - 0.0855 * H, 0.132 * wd, 0.066 * H))
+                    wj = _gauss(u, v, r.mouth[0], r.mouth[1] + 0.072 * H, 0.204 * wd, 0.0855 * H)
+                wc = _smooth(r.neck[1] - 0.08 * H, r.neck[1] + 0.29 * H, v) \
+                    * (1.0 - _smooth(r.neck[1] + 0.9 * H, r.neck[1] + 1.7 * H, v))
                 self._src.append((x, y))
                 self._weights.append((u, v, wh, depth, we_l, we_r, wb, wj, wc))
 
         # celle completamente vuote: non si disegnano
         self._cells = []
-        cw, ch = tw / NX, th / NY
-        for j in range(NY):
-            for i in range(NX):
+        for j in range(len(ys) - 1):
+            for i in range(len(xs) - 1):
                 hit = False
                 for fy in (0.1, 0.5, 0.9):
                     for fx in (0.1, 0.5, 0.9):
-                        xx = min(tw - 1, int((i + fx) * cw))
-                        yy = min(th - 1, int((j + fy) * ch))
+                        xx = min(tw - 1, int(xs[i] + (xs[i + 1] - xs[i]) * fx))
+                        yy = min(th - 1, int(ys[j] + (ys[j + 1] - ys[j]) * fy))
                         if static.pixelColor(xx, yy).alpha() > 0:
                             hit = True
                             break
@@ -187,8 +226,14 @@ class Skin:
     def bounds(self, size: float) -> QRectF:
         """Ingombro attorno al punto d'appoggio (centro in basso), per la maschera."""
         w = size * self.aspect
-        return QRectF(-w * (0.5 + PAD_SIDE) - MARGIN, -size * (1 + PAD_TOP) - MARGIN,
-                      w * (1 + 2 * PAD_SIDE) + 2 * MARGIN, size * (1 + PAD_TOP) + 2 * MARGIN + size * 0.12)
+        pad = PAD_HEAD * self.rig.head
+        return QRectF(-w * (0.5 + PAD_SIDE) - MARGIN, -size * (1 + pad) - MARGIN,
+                      w * (1 + 2 * PAD_SIDE) + 2 * MARGIN, size * (1 + pad) + 2 * MARGIN + size * 0.12)
+
+    def point(self, u: float, v: float, size: float) -> tuple[float, float]:
+        """Un punto dello sprite (0..1) rispetto al punto d'appoggio, alla taglia data."""
+        w = size * self.aspect
+        return (u - 0.5) * w, -(1.0 - v) * size + size * (self.rig.feet - 1.0) + self.sink * size * 1.02
 
     # --------------------------------------------------------------- dinamica
     def advance(self, dt: float, pose: Pose, look: tuple[float, float] = (0.0, 0.0)) -> None:
@@ -233,15 +278,16 @@ class Skin:
     def _work_texture(self, pose: Pose) -> QImage:
         """Sprite + palpebre + bocca/lingua, ancora NON deformato."""
         closed = 1.0 - max(0.0, min(1.0, pose.eye_open))
-        if closed <= 0.02 and pose.tongue <= 0.02 and self.jaw <= 0.03:
+        drawn_mouth = not self.rig.open_mouth and (pose.tongue > 0.02 or self.jaw > 0.03)
+        if not self.rig.face or (closed <= 0.02 and not drawn_mouth):
             return self._static
         work = self._static.copy()
         p = QPainter(work)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        if self.jaw > 0.03 or pose.tongue > 0.02:
+        if drawn_mouth:
             self._mouth(p, pose)
-        if closed > 0.02 and self.outfit not in ("ski",):
+        if closed > 0.02 and self.outfit not in ("ski",):      # la maschera da sci copre gli occhi
             self._lids(p, closed)
         p.end()
         return work
@@ -294,7 +340,7 @@ class Skin:
     def _mouth(self, p: QPainter, pose: Pose) -> None:
         """Interno della bocca e lingua, disegnati prima della deformazione."""
         m = self.uv(*self.rig.mouth)
-        w, h = self.sw, self.sh
+        w, h = self.hs * 1.2013, self.hs * 1.3158      # proporzioni tarate sul primo piano
         p.setPen(Qt.NoPen)
         if self.jaw > 0.03:
             gap = QRadialGradient(m.x(), m.y() + h * 0.008, w * 0.075)
@@ -339,9 +385,11 @@ class Skin:
     def _displace(self) -> list[tuple[float, float]]:
         """Posizione di ogni vertice dopo la deformazione."""
         r = self.rig
-        sw, sh = self.sw, self.sh
+        sw, hs = self.sw, self.hs
         yaw, pitch = self.yaw, self.pitch
         roll = math.radians(self.roll)
+        jaw = self.jaw * (1.7 if r.open_mouth else 1.0)
+        mid = r.neck[0]
         breath = math.sin(self.clock * 1.7)
         piv = self.uv(*r.neck)
         bl, br = self.uv(r.ear_l[2], r.ear_l[3]), self.uv(r.ear_r[2], r.ear_r[3])
@@ -358,13 +406,13 @@ class Skin:
                 dx, dy = x - br.x(), y - br.y()
                 x, y = br.x() + dx * math.cos(a) - dy * math.sin(a), br.y() + dx * math.sin(a) + dy * math.cos(a)
             # parallasse: il muso (vicino) si sposta piu' del cranio (lontano)
-            x += yaw * (0.050 * depth + 0.014) * wh * sw
-            y += pitch * (0.046 * depth + 0.012) * wh * sh
-            y -= self.brow * 0.013 * sh * wb
-            y += self.jaw * 0.020 * sh * wj
+            x += yaw * (0.060 * depth + 0.0168) * wh * hs
+            y += pitch * (0.0605 * depth + 0.0158) * wh * hs
+            y -= self.brow * 0.0171 * hs * wb
+            y += jaw * 0.0263 * hs * wj
             # respiro
-            x += (u - 0.5) * sw * 0.010 * breath * wc
-            y -= breath * 0.0035 * sh * wh
+            x += (u - mid) * sw * 0.010 * breath * wc
+            y -= breath * 0.0046 * hs * wh
             # inclinazione della testa attorno al collo
             if roll and wh > 0.0:
                 a = roll * wh
@@ -386,16 +434,19 @@ class Skin:
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         p.setPen(Qt.NoPen)
         brush = QBrush(work)
-        cw, ch = tw / NX, th / NY
-        row = NX + 1
+        xs, ys = self._xs, self._ys
+        nx, row = len(xs) - 1, len(xs)
         grow = 0.75
-        for j in range(NY):
-            for i in range(NX):
-                if not self._cells[j * NX + i]:
+        for j in range(len(ys) - 1):
+            y0, y1 = ys[j], ys[j + 1]
+            ch = y1 - y0
+            for i in range(nx):
+                if not self._cells[j * nx + i]:
                     continue
                 a = j * row + i
                 d00, d10, d01, d11 = dst[a], dst[a + 1], dst[a + row], dst[a + row + 1]
-                x0, y0 = i * cw, j * ch
+                x0, x1 = xs[i], xs[i + 1]
+                cw = x1 - x0
                 # triangolo alto-sinistro
                 m11, m12 = (d10[0] - d00[0]) / cw, (d10[1] - d00[1]) / cw
                 m21, m22 = (d01[0] - d00[0]) / ch, (d01[1] - d00[1]) / ch
@@ -404,7 +455,6 @@ class Skin:
                 p.setBrush(brush)
                 p.drawConvexPolygon(_grown((d00, d10, d01), grow))
                 # triangolo basso-destro
-                x1, y1 = x0 + cw, y0 + ch
                 m11, m12 = (d11[0] - d01[0]) / cw, (d11[1] - d01[1]) / cw
                 m21, m22 = (d11[0] - d10[0]) / ch, (d11[1] - d10[1]) / ch
                 brush.setTransform(QTransform(m11, m12, m21, m22,
@@ -418,6 +468,7 @@ class Skin:
         """Disegna con origine nel punto d'appoggio: (0,0) = centro, bordo inferiore."""
         buf = self.render(pose, size)
         sw, sh = self.sw, self.sh
+        osize = sw / 0.913 if self.rig.full else size      # accessori in proporzione alla larghezza
         hop = abs(math.sin(pose.leg_phase)) * size * 0.022 * pose.leg_swing
         painter.save()
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
@@ -434,7 +485,7 @@ class Skin:
         if self.outfit:
             from . import outfits
 
-            outfits.draw_behind(painter, self.outfit, self, size)
+            outfits.draw_behind(painter, self.outfit, self, osize)
 
         painter.save()
         lift = sh * 0.5 * min(1.0, abs(pose.spin) / 90.0)
@@ -452,13 +503,13 @@ class Skin:
         if pose.prop or self.outfit:
             from . import outfits
 
-            outfits.draw_front(painter, pose.prop, self.outfit, self, size)
+            outfits.draw_front(painter, "" if self.rig.full else pose.prop, self.outfit, self, osize)
         self._paws(painter, pose, size)
         painter.restore()
 
     def _paws(self, painter: QPainter, pose: Pose, size: float) -> None:
         """Zampe vere appoggiate al bordo: salgono da sotto, battono, si alzano."""
-        if self.paw is None or pose.paws <= 0.02:
+        if self.paw is None or self.rig.full or pose.paws <= 0.02:
             return
         ph = size * 0.38
         pw = ph * self.paw.width() / self.paw.height()
@@ -480,6 +531,213 @@ class Skin:
                 painter.scale(-1.0, 1.0)
             painter.drawImage(QRectF(-pw / 2, -ph, pw, ph), self.paw)
             painter.restore()
+
+
+# Se una vista manca si ripiega su quella piu' vicina (l'ultima scelta e' sempre "casa").
+FALLBACK = {
+    "serio": ("seduto",),
+    "seduto": ("serio",),
+    "sdraiato": ("seduto", "serio"),
+    "dietro": (),
+    "busto": (),
+}
+
+
+class SkinSet:
+    """Tutte le viste di un animale (primo piano, seduto, serio, di spalle...).
+
+    La posa chiede una vista (`pose.view`); qui si sceglie quella disponibile piu'
+    vicina e si passa dall'una all'altra senza scatti. Verso l'esterno si comporta
+    come una pelle sola: advance(), draw(), bounds().
+    """
+
+    def __init__(self, name: str, views: dict[str, Skin], home: str = "", species: str = "cane") -> None:
+        if not views:
+            raise ValueError("pelle senza viste")
+        self.name = name
+        self.views = views
+        self.species = species
+        self.default_home = home if home in views else next(iter(views))
+        self.home = self.default_home
+        self.cur = self.home
+        self.prev: str | None = None
+        self.mix = 1.0
+        self.away = 0.0
+        self.outfit = ""
+
+    # ------------------------------------------------------------- caricamento
+    @classmethod
+    def load(cls, folder: str | Path) -> "SkinSet":
+        folder = Path(folder)
+        data = json.loads((folder / "rig.json").read_text(encoding="utf-8"))
+        name = data.get("name", folder.name)
+        paw = None
+        if data.get("paw") and (folder / data["paw"]).exists():
+            paw = QImage(str(folder / data["paw"]))
+        specs: dict[str, dict] = {}
+        if data.get("sprite") or "views" not in data:
+            specs["busto"] = data
+        specs.update(data.get("views", {}))
+        views: dict[str, Skin] = {}
+        for key, spec in specs.items():
+            img = QImage(str(folder / spec.get("sprite", "sprite.png")))
+            if img.isNull():
+                if key == "busto" and "views" not in data:
+                    raise FileNotFoundError(f"sprite non caricato: {folder}")
+                continue
+            rig = Rig.from_dict(spec)
+            rig.tongue = spec.get("tongue", data.get("tongue", rig.tongue))
+            views[key] = Skin(f"{name}/{key}", img, rig, None if rig.full else paw)
+        if not views:
+            raise FileNotFoundError(f"sprite non caricato: {folder}")
+        return cls(name, views, data.get("home", ""), data.get("species", "cane"))
+
+    # ---------------------------------------------------------------- vista
+    @property
+    def view(self) -> Skin:
+        return self.views[self.cur]
+
+    @property
+    def full(self) -> bool:
+        """La vista di casa e' una figura intera?"""
+        return self.views[self.home].rig.full
+
+    def has(self, view: str) -> bool:
+        return view in self.views
+
+    def framings(self) -> list[str]:
+        """Inquadrature tra cui l'utente puo' scegliere."""
+        out = []
+        if any(v.rig.full and v.rig.face for v in self.views.values()):
+            out.append("intera")
+        if any(not v.rig.full for v in self.views.values()):
+            out.append("busto")
+        return out
+
+    def set_framing(self, framing: str) -> None:
+        """'intera' = figura intera, 'busto' = primo piano affacciato dal bordo."""
+        want_full = framing != "busto"
+        if self.views[self.default_home].rig.full == want_full:
+            self.home = self.default_home
+            return
+        for key, v in self.views.items():
+            if v.rig.full == want_full and v.rig.face:
+                self.home = key
+                return
+
+    def resolve(self, view: str) -> str:
+        if not view:
+            return self.home
+        if view in self.views:
+            return view
+        for alt in FALLBACK.get(view, ()):
+            if alt in self.views:
+                return alt
+        return self.home
+
+    # per il codice che tratta la pelle come una sola
+    @property
+    def image(self) -> QImage:
+        return self.view.image
+
+    @property
+    def rig(self) -> Rig:
+        return self.view.rig
+
+    @property
+    def aspect(self) -> float:
+        return self.view.aspect
+
+    @property
+    def sink(self) -> float:
+        return self.view.sink
+
+    def set_outfit(self, outfit: str) -> None:
+        self.outfit = outfit
+        for v in self.views.values():
+            v.set_outfit(outfit)
+
+    def _scale(self) -> float:
+        return 1.0 - AWAY_SHRINK * self.away
+
+    def height(self, size: float) -> float:
+        return size * self.view.rig.height * self._scale()
+
+    def rect(self, size: float) -> QRectF:
+        """Parte visibile del cane attorno al punto d'appoggio (per click e fumetti)."""
+        v = self.view
+        h = self.height(size)
+        w = h * v.aspect
+        top = -h * max(0.12, 1.0 - v.sink)
+        return QRectF(-w / 2, top, w, -top)
+
+    def bounds(self, size: float) -> QRectF:
+        r = self.view.bounds(size * self.view.rig.height)
+        if self.prev and self.mix < 1.0:
+            r = r.united(self.views[self.prev].bounds(size * self.views[self.prev].rig.height))
+        return r
+
+    def point(self, what: str, size: float) -> tuple[float, float]:
+        """Dove sono bocca / testa rispetto al punto d'appoggio (palla, zzz, cuori)."""
+        v = self.view
+        r = v.rig
+        u, t = {"mouth": r.mouth, "nose": r.nose}.get(what, r.head_top) if r.face else r.head_top
+        x, y = v.point(u, t, size * r.height)
+        k = self._scale()
+        return x * k, y * k
+
+    @property
+    def visible(self) -> bool:
+        return self.away < 0.96
+
+    # --------------------------------------------------------------- dinamica
+    def advance(self, dt: float, pose: Pose, look: tuple[float, float] = (0.0, 0.0)) -> None:
+        want = self.resolve(pose.view)
+        if want != self.cur:
+            old, new = self.views[self.cur], self.views[want]
+            new.yaw, new.pitch, new.roll = old.yaw, old.pitch, old.roll
+            new.brow, new.jaw, new.clock = old.brow, old.jaw, old.clock
+            new.sink = 0.0 if new.rig.full else 1.0     # il primo piano sale da sotto il bordo
+            self.prev, self.cur, self.mix = self.cur, want, 0.0
+        self.away += (max(0.0, min(1.0, pose.away)) - self.away) * min(1.0, dt * 14.0)
+        if self.prev is not None:
+            a, b = self.views[self.prev], self.views[self.cur]
+            slow = not (a.rig.full and b.rig.full)
+            self.mix = min(1.0, self.mix + dt / (0.42 if slow else 0.24))
+            if self.mix >= 1.0:
+                self.prev = None
+            else:
+                gone = pose if a.rig.full else _with(pose, sink=1.0)   # il primo piano se ne va scendendo
+                a.advance(dt, gone, look)
+        self.view.advance(dt, pose, look)
+
+    # ---------------------------------------------------------------- disegno
+    def draw(self, painter: QPainter, pose: Pose, size: float) -> None:
+        if not self.visible:
+            return
+        k = self._scale()
+        fade = 1.0 - _smooth(0.55, 1.0, self.away)
+        painter.save()
+        painter.scale(k, k)
+        new = self.view
+        if self.prev is not None and self.mix < 1.0:
+            old = self.views[self.prev]
+            # il nuovo compare sopra il vecchio, poi il vecchio svanisce: mai "trasparente"
+            a_old = 1.0 - _smooth(0.45, 1.0, self.mix)
+            a_new = _smooth(0.0, 0.6, self.mix) if new.rig.full else 1.0
+            painter.setOpacity(fade * a_old)
+            old.draw(painter, pose, size * old.rig.height)
+            painter.setOpacity(fade * a_new)
+        else:
+            painter.setOpacity(fade)
+        new.draw(painter, pose, size * new.rig.height)
+        painter.restore()
+
+
+def _with(pose: Pose, **changes) -> Pose:
+    from dataclasses import replace
+
+    return replace(pose, **changes)
 
 
 def _grown(tri, amount: float) -> QPolygonF:

@@ -43,3 +43,5 @@ class Pose:
     paw_r: float = 0.0           # zampa destra sollevata 0..1
     paw_reach: float = 0.0       # zampa destra verso la bocca 0..1
     prop: str = ""               # oggetto di scena ("keyboard")
+    view: str = ""               # vista richiesta: "" = casa, busto, seduto, serio, dietro
+    away: float = 0.0            # si allontana: 0 qui .. 1 sparito in lontananza

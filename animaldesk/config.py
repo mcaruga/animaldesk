@@ -65,6 +65,8 @@ class Config:
     skin: str = "golden-reale"      # cartella in assets/skins, "" = disegno vettoriale
     breed: str = "golden"           # razza usata dal disegno vettoriale
     outfit: str = "auto"            # auto (stagionale) | "" | santa | summer | ski
+    framing: str = "intera"         # intera (figura intera) | busto (primo piano dal bordo)
+    props_ttl: int = 180            # secondi dopo cui palla, biscotti e ricordini spariscono (0 = mai)
     stats: dict[str, float] = field(default_factory=lambda: {"energia": 100.0, "fame": 0.0, "felicita": 80.0})
 
     @classmethod
@@ -80,6 +82,9 @@ class Config:
                 setattr(cfg, key, value)
         cfg.size = max(60, min(400, int(cfg.size)))
         cfg.speed = max(0.25, min(3.0, float(cfg.speed)))
+        cfg.props_ttl = max(0, min(3600, int(cfg.props_ttl)))
+        if cfg.framing not in ("intera", "busto"):
+            cfg.framing = "intera"
         base = cls().stats
         base.update({k: float(v) for k, v in dict(cfg.stats).items() if k in base})
         cfg.stats = base
