@@ -16,6 +16,8 @@ DRAG_FLAIL = 1.0
 TRAVEL_OUT = 1.15         # figura intera: secondi per andare via di spalle...
 TRAVEL_IN = 0.9           # ...e per ricomparire nel punto nuovo
 CLOSE_UPS = ("typing", "lick", "hide", "sleep", "boop", "tease")   # azioni da primo piano
+# anche con le zampe animate, queste restano piu' belle da vicino (se c'e' la foto in primo piano)
+PREFER_CLOSE = ("typing", "sleep")
 
 
 @dataclass
@@ -839,13 +841,13 @@ class Pet:
     def _rig_pose(self, p: Pose) -> None:
         """Campi usati dalla pelle fotografica (testa che gira, zampe, lingua...)."""
         st, t, e = self.state, self.t, self._ease()
-        if self.full and self.close and not self.legs and st in CLOSE_UPS:
-            p.view = "busto"                    # senza zampe animabili: viene vicino, le zampe arrivano sul bordo
+        if self.full and self.close and st in (PREFER_CLOSE if self.legs else CLOSE_UPS):
+            p.view = "busto"                    # viene vicino: le zampe arrivano sul bordo
         if st == "sleep" and "dorme" in self.views and self.full:
             p.view = "dorme" if t > 0.6 else ""          # si accoccola: morph sulla foto di lui che dorme
         elif st == "sleep":
             p.sink = 0.36
-            if not self.close or self.legs:
+            if not self.close:
                 p.pitch = 0.55
                 if self.legs:
                     p.sink = 0.0

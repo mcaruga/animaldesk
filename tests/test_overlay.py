@@ -115,6 +115,10 @@ def test_click_sulla_palla_ferma_la_rilancia(ov):
 
 
 def test_il_biscotto_viene_mangiato(ov):
+    import random
+
+    random.seed(7)                      # niente estrazioni sfortunate (es. sonno appena lanciato)
+    ov.pet.stats.energia = 90.0
     ov.pet.set_state("idle", 0.1)
     ov.command("treat")
     assert [i.kind for i in ov.items] == ["treat"]

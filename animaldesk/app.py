@@ -380,13 +380,19 @@ def self_test() -> int:
         app.set_framing("intera")
         if not ov.pet.legs:
             raise RuntimeError("la pelle di default deve avere le zampe animabili")
-        ov.pet.set_state("typing", 3.0)
+        ov.pet.set_state("tease", 3.0)
         lifts = set()
         for _ in range(60):
             ov._tick()
             lifts.add(round(ov.pet.pose.lift_l, 1))
-        if max(lifts) < 0.2:
+        if max(lifts) < 0.2 or ov.skin.cur == "busto":
             raise RuntimeError("le zampe non si muovono a figura intera")
+        for state in ("typing", "sleep"):            # queste restano in primo piano
+            ov.pet.set_state(state, 4.0)
+            for _ in range(30):
+                ov._tick()
+            if ov.skin.cur != "busto":
+                raise RuntimeError(f"{state}: doveva passare al primo piano")
         ov.pet.set_state("leave", 9.0)
         morphed = False
         for _ in range(120):

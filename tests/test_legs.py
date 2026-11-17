@@ -113,7 +113,7 @@ def _pose(pet, state, t=0.3):
     return pet._build_pose()
 
 
-@pytest.mark.parametrize("action", ["typing", "lick", "scratch", "boop", "tease", "bark"])
+@pytest.mark.parametrize("action", ["lick", "scratch", "boop", "tease", "bark"])
 def test_le_azioni_con_zampe_restano_a_figura_intera(action):
     pet = _pet(True)
     lifted = False
@@ -128,8 +128,16 @@ def test_senza_zampe_si_usa_ancora_il_primo_piano():
     assert _pose(_pet(False), "typing").view == "busto"
 
 
+@pytest.mark.parametrize("action", ["typing", "sleep"])
+def test_tastiera_e_nanna_in_primo_piano_se_c_e(action):
+    """Le preferite in primo piano: anche con le zampe animate, se c'e' la foto vicina."""
+    assert _pose(_pet(True), action, 1.0).view == "busto"
+    senza = Pet(bust=True, full=True, views=("seduto", "serio", "dietro"), legs=True)
+    assert _pose(senza, action, 1.0).view != "busto"
+
+
 def test_battere_alla_tastiera_alterna_le_zampe():
-    pet = _pet(True)
+    pet = Pet(bust=True, full=True, views=("seduto", "serio", "dietro"), legs=True)   # niente primo piano
     seen_l = seen_r = False
     for i in range(40):
         pose = _pose(pet, "typing", 0.6 + i * 0.01)

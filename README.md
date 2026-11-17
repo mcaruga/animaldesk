@@ -66,6 +66,7 @@ intorno, **testa di lato**, grattata, occhi felici, linguetta, dispetto, abbaia,
 - **Sdraiati** — (se c'e' la foto `sdraiato`) si sdraia con un morph, si guarda
   intorno, sorride con la lingua, ogni tanto allunga una zampa.
 - **Dormi** usa la foto `dorme` se c'e': si accoccola davvero, con il respiro.
+- **Scrivi alla tastiera** e **Dormi** restano in primo piano quando la pelle ha la foto `busto` (come il golden): da vicino sono piu' belle. Le altre azioni con le zampe restano a figura intera.
 
 ### Pelli incluse
 
@@ -227,7 +228,7 @@ i click al desktop.
 display.
 
 ```bash
-python -m pytest -q      # 150 test
+python -m pytest -q      # 151 test
 ```
 
 ## Licenza
