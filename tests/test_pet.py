@@ -66,6 +66,32 @@ def test_sceglie_di_mangiare_se_affamato(world):
     assert pet.choose_behavior(world) == "eat"
 
 
+def test_da_fermo_la_testa_segue_il_cursore(world):
+    """Idle: il muso si gira verso il puntatore (destra -> yaw positivo, sinistra -> negativo)."""
+    pet = Pet(bust=True, full=True, views=("busto", "seduto", "serio", "dietro"))
+    pet.x, pet.y = 500.0, world.ground
+    pet.set_state("idle", 60.0)
+    world.cursor_x, world.cursor_y = 660.0, world.ground - 80
+    for _ in range(40):
+        pose = pet.update(1 / 30, world)
+    assert pose.yaw > 0.2 and pet.alert > 0.2          # vicino: guarda e drizza le orecchie
+    world.cursor_x = 100.0
+    for _ in range(40):
+        pose = pet.update(1 / 30, world)
+    assert pose.yaw < -0.2
+
+
+def test_lo_sguardo_non_disturba_le_azioni(world):
+    """Mentre fa un'azione con la testa scriptata, lo sguardo verso il cursore non si somma."""
+    pet = Pet(bust=True, full=True, views=("busto", "seduto", "serio", "dietro"))
+    pet.x, pet.y = 500.0, world.ground
+    world.cursor_x = 900.0
+    pet.set_state("bark", 2.0)
+    for _ in range(10):
+        pet.update(1 / 30, world)
+    assert abs(pet.gaze_x) < 0.05            # fuori dagli stati a riposo: niente sguardo
+
+
 def test_insegue_il_cursore(world):
     pet = Pet()
     pet.x = 100

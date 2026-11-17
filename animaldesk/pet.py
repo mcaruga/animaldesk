@@ -17,6 +17,8 @@ TRAVEL_OUT = 1.15         # figura intera: secondi per andare via di spalle...
 TRAVEL_IN = 0.9           # ...e per ricomparire nel punto nuovo
 # azioni da primo piano: se c'e' la foto vicina, si fanno da vicino (zampa alla bocca, tastiera...)
 CLOSE_UPS = ("typing", "lick", "hide", "sleep", "boop", "tease")
+# stati "a riposo" in cui la testa segue il puntatore (come fa un pet sulla scrivania)
+GAZE_STATES = ("idle", "sit")
 
 
 @dataclass
@@ -120,6 +122,9 @@ class Pet:
         self.tail_phase = 0.0
         self.blink = 1.0
         self.blink_timer = random.uniform(2.0, 5.0)
+        self.gaze_x = 0.0        # testa verso il cursore: -1 sinistra .. +1 destra (smussato)
+        self.gaze_y = 0.0        # -1 su .. +1 giu'
+        self.alert = 0.0         # 0 cursore lontano .. 1 vicino: orecchie su, sopracciglia
         self.spin = 0.0
         self.squash = 1.0
         self.pose = Pose()
@@ -322,9 +327,27 @@ class Pet:
         if self.state not in ("dragged",):
             self._physics(dt, world)
         self._blink(dt)
+        self._track_cursor(dt, world)
         self.tail_phase += dt * (9.0 + self.stats.felicita / 12.0)
         self.pose = self._build_pose()
         return self.pose
+
+    def _track_cursor(self, dt: float, world: World) -> None:
+        """Da fermo la testa si gira dolcemente verso il puntatore e, se e' vicino,
+        drizza le orecchie. Smussato, cosi' non scatta."""
+        if self.state in GAZE_STATES and self._trav is None:
+            s = world.scale
+            head_y = self.y - 70.0 * s
+            tx = max(-1.0, min(1.0, (world.cursor_x - self.x) / (260.0 * s)))
+            ty = max(-1.0, min(1.0, (world.cursor_y - head_y) / (220.0 * s)))
+            dist = math.hypot(world.cursor_x - self.x, world.cursor_y - head_y) / (300.0 * s)
+            ta = max(0.0, 1.0 - dist)
+        else:
+            tx = ty = ta = 0.0
+        k = min(1.0, dt * 4.0)
+        self.gaze_x += (tx - self.gaze_x) * k
+        self.gaze_y += (ty - self.gaze_y) * k
+        self.alert += (ta - self.alert) * k
 
     def _update_stats(self, dt: float) -> None:
         self._stat_timer += dt
@@ -965,6 +988,12 @@ class Pet:
                 p.pitch = -0.32 * k                        # muso in su, sollevato
                 p.eye_open = min(p.eye_open, 1.0 - 0.55 * k)
                 p.brow = 0.4 * k
+
+        if st in GAZE_STATES and self._trav is None and p.view in ("", "busto"):
+            p.yaw += self.gaze_x * 0.6                      # la testa segue il cursore
+            p.pitch += self.gaze_y * 0.45
+            p.ear_flop = max(p.ear_flop, 0.25 * self.alert)  # orecchie su se il mouse e' vicino
+            p.brow = max(p.brow, 0.35 * self.alert)
 
         if self.legs and self.full:
             self._leg_pose(p, st, t, e)

@@ -77,7 +77,9 @@ intorno, **testa di lato**, grattata, occhi felici, linguetta, dispetto, abbaia,
 
 Si sceglie da **Aspetto → Foto: ...**.
 
-Lo sguardo segue il puntatore quando e' vicino, e la palla mentre rimbalza. Gli
+Quando sta fermo (seduto o a riposo) il muso **segue dolcemente il puntatore** e
+drizza le orecchie se il mouse gli si avvicina; lo sguardo segue anche la palla
+mentre rimbalza. Il movimento e' smussato nel tempo, cosi' la testa non scatta. Gli
 spostamenti del viso sono limitati di proposito e misurati in "teste", cosi'
 valgono uguali per un primo piano e per una figura intera (un test verifica che
 nessun vertice si muova piu' del 12,5% dell'altezza della testa e che zampe e
@@ -228,7 +230,7 @@ i click al desktop.
 display.
 
 ```bash
-python -m pytest -q      # 156 test
+python -m pytest -q      # 158 test
 ```
 
 ## Licenza
